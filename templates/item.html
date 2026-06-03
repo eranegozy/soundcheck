@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{{ item.display_name if item else "Item" }} — Soundcheck{% endblock %}
+
+{% block content %}
+  <p class="back-link"><a href="{{ url_for('index') }}">← Back to inventory</a></p>
+
+  {% if error and not item %}
+    <p class="message message-error">{{ error }}</p>
+  {% elif item %}
+    {% if error %}
+      <p class="message message-error">{{ error }}</p>
+    {% endif %}
+
+    <article class="item-detail">
+      <header class="item-header">
+        <div class="inventory-thumb-wrap item-detail-thumb">
+          <img
+            class="inventory-thumb"
+            src="{{ item.image_url }}"
+            alt="{{ item.display_name }}"
+          />
+        </div>
+        <div class="item-header-text">
+          <h2 class="item-title">{{ item.display_name }}</h2>
+          {% if status %}
+            <div class="badge-row">
+              <span class="badge badge-custody badge-custody-{{ status.custody }}">
+                {{ status.custody_label }}
+              </span>
+              {% if status.condition != 'ok' %}
+                <span class="badge badge-condition badge-condition-{{ status.condition }}">
+                  {{ status.condition_label }}
+                </span>
+              {% endif %}
+              {% if status.has_reservation %}
+                <span class="badge badge-reserved">Reserved</span>
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+      </header>
+
+      <dl class="item-facts">
+        <dt>Item ID</dt>
+        <dd>{{ item.item_id }}</dd>
+        <dt>Brand</dt>
+        <dd>{{ item.brand }}</dd>
+        <dt>Model</dt>
+        <dd>{{ item.model }}</dd>
+        <dt>Number</dt>
+        <dd>{{ item.number }}</dd>
+        <dt>Serial</dt>
+        <dd>{{ item.serial }}</dd>
+        <dt>Category</dt>
+        <dd>{{ item.category }}</dd>
+        <dt>Location</dt>
+        <dd>{{ item.location }}</dd>
+        <dt>Components</dt>
+        <dd>
+          {% if item.components %}
+            <ul class="components-list">
+              {% for component in item.components %}
+                <li>{{ component }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            —
+          {% endif %}
+        </dd>
+        {% if status and status.custody == 'checked_out' and status.projected_return_date %}
+          <dt>Projected return</dt>
+          <dd>{{ status.projected_return_date }}</dd>
+        {% endif %}
+        {% if status and status.condition != 'ok' and status.condition_description %}
+          <dt>Condition notes</dt>
+          <dd>{{ status.condition_description }}</dd>
+        {% endif %}
+      </dl>
+
+      {% if status and status.reservations %}
+        <section class="item-section">
+          <h3>Active reservations</h3>
+          <ul class="reservation-list">
+            {% for reservation in status.reservations %}
+              <li>
+                {{ reservation.reserve_start }} – {{ reservation.reserve_end }}:
+                {{ reservation.name }} ({{ reservation.kerberos }})
+                <span class="reservation-id">{{ reservation.reservation_id }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+
+      <section class="item-section">
+        <h3>Transaction history</h3>
+        {% if history %}
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Action</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in history %}
+                <tr>
+                  <td>{{ row.timestamp }}</td>
+                  <td>{{ row.action_label }}</td>
+                  <td>{{ row.detail }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="message">No transactions yet.</p>
+        {% endif %}
+      </section>
+    </article>
+  {% endif %}
+{% endblock %}

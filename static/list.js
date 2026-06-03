@@ -68,9 +68,17 @@
     return sorted;
   }
 
+  function createBadge(text, className) {
+    const badge = document.createElement("span");
+    badge.className = `badge ${className}`;
+    badge.textContent = text;
+    return badge;
+  }
+
   function createItemRow(item) {
-    const li = document.createElement("li");
-    li.className = "inventory-item";
+    const link = document.createElement("a");
+    link.className = "inventory-item";
+    link.href = item.item_url;
 
     const thumbWrap = document.createElement("div");
     thumbWrap.className = "inventory-thumb-wrap";
@@ -84,9 +92,31 @@
     const summary = document.createElement("div");
     summary.className = "inventory-summary";
 
+    const nameRow = document.createElement("div");
+    nameRow.className = "inventory-name-row";
+
     const name = document.createElement("span");
     name.className = "inventory-name";
     name.textContent = item.display_name;
+    nameRow.appendChild(name);
+
+    const badges = document.createElement("div");
+    badges.className = "badge-row";
+    badges.appendChild(
+      createBadge(item.custody_label, `badge-custody badge-custody-${item.custody}`)
+    );
+    if (item.condition && item.condition !== "ok") {
+      badges.appendChild(
+        createBadge(
+          item.condition_label,
+          `badge-condition badge-condition-${item.condition}`
+        )
+      );
+    }
+    if (item.has_reservation) {
+      badges.appendChild(createBadge("Reserved", "badge-reserved"));
+    }
+    nameRow.appendChild(badges);
 
     const category = document.createElement("span");
     category.className = "inventory-meta";
@@ -96,9 +126,12 @@
     location.className = "inventory-meta";
     location.textContent = item.location;
 
-    summary.append(name, category, location);
-    li.append(thumbWrap, summary);
-    return li;
+    summary.append(nameRow, category, location);
+    link.append(thumbWrap, summary);
+
+    const row = document.createElement("li");
+    row.appendChild(link);
+    return row;
   }
 
   function updateStatus(shown, total) {

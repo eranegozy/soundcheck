@@ -91,6 +91,86 @@ def condition_label(condition: str) -> str:
     }.get(condition, condition)
 
 
+ACTION_LABELS = {
+    "checkout": "Check out",
+    "checkin": "Check in",
+    "change_condition": "Change condition",
+    "reserve": "Reserve",
+    "cancel_reservation": "Cancel reservation",
+}
+
+
+def custody_label(state: ItemState) -> str:
+    if state.custody == "checked_out" and state.name:
+        return f"Checked out — {state.name}"
+    if state.custody == "checked_out":
+        return "Checked out"
+    return "Available"
+
+
+def item_state_dict(state: ItemState) -> dict:
+    reservations = sorted(state.reservations.values(), key=lambda r: r.reserve_start)
+    return {
+        "custody": state.custody,
+        "custody_label": custody_label(state),
+        "condition": state.condition,
+        "condition_label": condition_label(state.condition),
+        "condition_description": state.condition_description,
+        "borrower_name": state.name,
+        "borrower_kerberos": state.kerberos,
+        "projected_return_date": (
+            state.projected_return_date.isoformat()
+            if state.projected_return_date
+            else None
+        ),
+        "reservations": [
+            {
+                "reservation_id": r.reservation_id,
+                "reserve_start": r.reserve_start.isoformat(),
+                "reserve_end": r.reserve_end.isoformat(),
+                "name": r.name,
+                "kerberos": r.kerberos,
+            }
+            for r in reservations
+        ],
+        "has_reservation": bool(reservations),
+    }
+
+
+def transaction_detail(row: dict[str, str]) -> str:
+    action = row["action"]
+    if action == "checkout":
+        return (
+            f"{row['name']} ({row['kerberos']}), "
+            f"return by {row['projected_return_date']}"
+        )
+    if action in ("checkin", "change_condition"):
+        text = f"{row['name']} ({row['kerberos']}), {condition_label(row['condition'])}"
+        if row["condition"] != "ok" and row["condition_description"]:
+            text += f" — {row['condition_description']}"
+        return text
+    if action == "reserve":
+        return (
+            f"{row['name']} ({row['kerberos']}), "
+            f"{row['reserve_start']} to {row['reserve_end']}, id {row['reservation_id']}"
+        )
+    if action == "cancel_reservation":
+        return f"Reservation {row['reservation_id']}"
+    return ""
+
+
+def history_for_display(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        {
+            "timestamp": row["timestamp"],
+            "action": row["action"],
+            "action_label": ACTION_LABELS.get(row["action"], row["action"]),
+            "detail": transaction_detail(row),
+        }
+        for row in rows
+    ]
+
+
 def generate_reservation_id(when: datetime | None = None) -> str:
     moment = when or datetime.now()
     suffix = secrets.token_hex(3)
