@@ -6,24 +6,43 @@
   {% endif %}
 
   {% if items %}
-    <ul class="inventory-list">
-      {% for item in items %}
-        <li class="inventory-item">
-          <div class="inventory-thumb-wrap">
-            <img
-              class="inventory-thumb"
-              src="{{ item.image_url }}"
-              alt="{{ item.display_name }}"
-            />
-          </div>
-          <div class="inventory-summary">
-            <span class="inventory-name">{{ item.display_name }}</span>
-            <span class="inventory-meta">{{ item.category }}</span>
-            <span class="inventory-meta">{{ item.location }}</span>
-          </div>
-        </li>
-      {% endfor %}
-    </ul>
+    <div class="inventory-controls">
+      <label class="control">
+        <span class="control-label">Search</span>
+        <input type="search" id="filter-q" placeholder="Name, brand, model, category…" autocomplete="off" />
+      </label>
+      <label class="control">
+        <span class="control-label">Category</span>
+        <select id="filter-category"></select>
+      </label>
+      <label class="control">
+        <span class="control-label">Location</span>
+        <select id="filter-location"></select>
+      </label>
+      <label class="control">
+        <span class="control-label">Sort by</span>
+        <select id="filter-sort">
+          <option value="display_name">Display name</option>
+          <option value="category">Category</option>
+          <option value="location">Location</option>
+        </select>
+      </label>
+      <label class="control">
+        <span class="control-label">Order</span>
+        <select id="filter-order">
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
+        </select>
+      </label>
+      <button type="button" class="control-clear" id="clear-filters">Clear</button>
+    </div>
+
+    <p class="inventory-status" id="inventory-status"></p>
+    <ul class="inventory-list" id="inventory-list"></ul>
+    <p class="message" id="inventory-empty" hidden>No items match your filters.</p>
+
+    <script id="inventory-data" type="application/json">{{ items | tojson }}</script>
+    <script src="{{ url_for('static', filename='list.js') }}" defer></script>
   {% elif not error %}
     <p class="message">No items in inventory.</p>
   {% endif %}
