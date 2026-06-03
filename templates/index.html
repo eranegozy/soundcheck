@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if error %}
+    <p class="message message-error">{{ error }}</p>
+  {% endif %}
+
+  {% if items %}
+    <ul class="inventory-list">
+      {% for item in items %}
+        <li class="inventory-item">
+          <div class="inventory-thumb-wrap">
+            <img
+              class="inventory-thumb"
+              src="{{ item.image_url }}"
+              alt="{{ item.display_name }}"
+            />
+          </div>
+          <div class="inventory-summary">
+            <span class="inventory-name">{{ item.display_name }}</span>
+            <span class="inventory-meta">{{ item.category }}</span>
+            <span class="inventory-meta">{{ item.location }}</span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% elif not error %}
+    <p class="message">No items in inventory.</p>
+  {% endif %}
+{% endblock %}
