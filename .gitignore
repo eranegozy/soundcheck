@@ -20,3 +20,6 @@ env/
 # Local env secrets
 .env
 .env.*
+
+# Runtime data (copy from data.example/ on setup)
+data/

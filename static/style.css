@@ -46,6 +46,7 @@ body {
   border-color: #fecaca;
   background: #fef2f2;
   color: #991b1b;
+  white-space: pre-line;
 }
 
 .inventory-controls {

@@ -1,6 +1,6 @@
 # Soundcheck Inventory
 
-File-based inventory listing for equipment loans. Phase 1 is read-only: CSV inventory and a web listing.
+File-based inventory and equipment loans. Inventory is static CSV; loan history is per-item transaction files.
 
 ## Setup (conda)
 
@@ -8,7 +8,10 @@ File-based inventory listing for equipment loans. Phase 1 is read-only: CSV inve
 conda create -n soundcheck python=3.14
 conda activate soundcheck
 pip install -r requirements.txt
+cp -r data.example data
 ```
+
+The `data/` directory is gitignored. Copy `data.example/` to `data/` before the first run (and after clone).
 
 ## Run
 
@@ -19,31 +22,35 @@ flask --app app run --debug
 
 Open http://127.0.0.1:5000/
 
-The listing page filters and sorts inventory in the browser (search, category, location). All items are loaded once from the server; no query parameters or page reloads.
+The listing page filters and sorts inventory in the browser (search, category, location). All items are loaded once from the server.
 
 ## Data layout
 
 ```
-data/
-  inventory.csv      # one row per item
-  images/            # image files referenced by the image column
+data/                          # gitignored — your local data
+  inventory.csv                # one row per item
+  images/                      # image files for the image column
+  transactions/
+    {item_id}.csv              # append-only history per item
+
+data.example/                  # committed template — copy to data/
 ```
 
 ## inventory.csv columns
 
-Every column is required on every row (non-empty values).
+Every column must be present in the header. All columns except `image` require a non-empty value on every row.
 
 | Column | Description |
 |--------|-------------|
-| `item_id` | Unique key |
+| `item_id` | Unique key (must be unique across all rows) |
 | `brand` | Manufacturer (e.g. Shure) |
 | `model` | Model name (e.g. SM-58) |
-| `number` | Copy number when multiple units share brand/model (use `1` for a single unit) |
+| `number` | Copy number when multiple units share brand/model (use `1` for a single unit). The combination of brand, model, and number must be unique. |
 | `serial` | Manufacturer serial on the item (use `n/a` if unknown) |
 | `category` | Type (e.g. microphone) |
 | `location` | Storage location |
 | `components` | Semicolon-separated list (e.g. `microphone; XLR cable`) |
-| `image` | Filename under `data/images/` |
+| `image` | Filename under `data/images/` (leave blank to use `placeholder.png`) |
 
 **Display name** (shown in the UI, not stored in CSV):
 
@@ -51,13 +58,30 @@ Every column is required on every row (non-empty values).
 {brand} {model} {number}
 ```
 
-Example: `Shure SM-58 2`.
+## Transaction files
 
-## Images
+One CSV per item at `data/transactions/{item_id}.csv`. Rows are appended at the bottom; history is shown oldest first.
 
-Place image files in `data/images/`. The `image` column must match the filename exactly.
+Timestamps use local wall time: `YYYY-MM-DD HH:MM:SS`. Dates use `YYYY-MM-DD`.
 
-If an image file is missing, the browser shows a broken image for that row. Sample data uses `placeholder.png`.
+| Column | Description |
+|--------|-------------|
+| `timestamp` | Required on every row |
+| `action` | `checkout`, `checkin`, `change_condition`, `reserve`, `cancel_reservation` |
+| `name` | Person (borrower, actor, or reserver) when applicable |
+| `kerberos` | Kerberos ID when `name` is set |
+| `projected_return_date` | Checkout only |
+| `condition` | `ok`, `component_missing`, or `broken` (checkin, change_condition) |
+| `condition_description` | Required when `condition` is not `ok` |
+| `reservation_id` | Set by the app on `reserve`; referenced on `cancel_reservation` |
+| `reserve_start` | Reservation start date |
+| `reserve_end` | Reservation end date |
+
+**Derived state** (replay rows in order):
+
+- **Custody:** `checkout` checks out; `checkin` returns to available.
+- **Condition:** Updated on `checkin` and `change_condition` (allowed while checked out).
+- **Reservations:** `reserve` adds; `cancel_reservation` removes. Checkout is blocked if today overlaps an active reservation.
 
 ## Adding items
 
