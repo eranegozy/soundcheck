@@ -186,7 +186,18 @@ def load_transactions(data_dir: Path, item_id: str) -> list[dict[str, str]]:
     return rows
 
 
-def replay_state(rows: list[dict[str, str]]) -> ItemState:
+def _drop_past_reservations(state: ItemState, as_of: date | None = None) -> None:
+    today = as_of or date.today()
+    state.reservations = {
+        reservation_id: reservation
+        for reservation_id, reservation in state.reservations.items()
+        if reservation.reserve_end >= today
+    }
+
+
+def replay_state(
+    rows: list[dict[str, str]], as_of: date | None = None
+) -> ItemState:
     state = ItemState()
 
     for row in rows:
@@ -228,11 +239,12 @@ def replay_state(rows: list[dict[str, str]]) -> ItemState:
         elif action == "cancel_reservation":
             state.reservations.pop(row["reservation_id"], None)
 
+    _drop_past_reservations(state, as_of)
     return state
 
 
-def load_item_state(data_dir: Path, item_id: str) -> ItemState:
-    return replay_state(load_transactions(data_dir, item_id))
+def load_item_state(data_dir: Path, item_id: str, as_of: date | None = None) -> ItemState:
+    return replay_state(load_transactions(data_dir, item_id), as_of=as_of)
 
 
 def dates_overlap(start_a: date, end_a: date, start_b: date, end_b: date) -> bool:
