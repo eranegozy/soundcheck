@@ -100,19 +100,31 @@ ACTION_LABELS = {
 }
 
 
-def custody_label(state: ItemState) -> str:
-    if state.custody == "checked_out" and state.name:
-        return f"Checked out — {state.name}"
+def is_past_due(state: ItemState, on_date: date) -> bool:
+    if state.custody != "checked_out" or state.projected_return_date is None:
+        return False
+    return state.projected_return_date < on_date
+
+
+def custody_label(state: ItemState, on_date: date) -> str:
     if state.custody == "checked_out":
-        return "Checked out"
+        if state.name:
+            label = f"Checked out — {state.name}"
+        else:
+            label = "Checked out"
+        if is_past_due(state, on_date):
+            label += " — past due"
+        return label
     return "Available"
 
 
-def item_state_dict(state: ItemState) -> dict:
+def item_state_dict(state: ItemState, on_date: date) -> dict:
     reservations = sorted(state.reservations.values(), key=lambda r: r.reserve_start)
+    past_due = is_past_due(state, on_date)
     return {
         "custody": state.custody,
-        "custody_label": custody_label(state),
+        "custody_label": custody_label(state, on_date),
+        "is_past_due": past_due,
         "condition": state.condition,
         "condition_label": condition_label(state.condition),
         "condition_description": state.condition_description,
@@ -266,18 +278,15 @@ def load_transactions(data_dir: Path, item_id: str) -> list[dict[str, str]]:
     return rows
 
 
-def _drop_past_reservations(state: ItemState, as_of: date | None = None) -> None:
-    today = as_of or date.today()
+def _drop_past_reservations(state: ItemState, on_date: date) -> None:
     state.reservations = {
         reservation_id: reservation
         for reservation_id, reservation in state.reservations.items()
-        if reservation.reserve_end >= today
+        if reservation.reserve_end >= on_date
     }
 
 
-def replay_state(
-    rows: list[dict[str, str]], as_of: date | None = None
-) -> ItemState:
+def replay_state(rows: list[dict[str, str]], on_date: date) -> ItemState:
     state = ItemState()
 
     for row in rows:
@@ -319,12 +328,12 @@ def replay_state(
         elif action == "cancel_reservation":
             state.reservations.pop(row["reservation_id"], None)
 
-    _drop_past_reservations(state, as_of)
+    _drop_past_reservations(state, on_date)
     return state
 
 
-def load_item_state(data_dir: Path, item_id: str, as_of: date | None = None) -> ItemState:
-    return replay_state(load_transactions(data_dir, item_id), as_of=as_of)
+def load_item_state(data_dir: Path, item_id: str, on_date: date) -> ItemState:
+    return replay_state(load_transactions(data_dir, item_id), on_date)
 
 
 def dates_overlap(start_a: date, end_a: date, start_b: date, end_b: date) -> bool:
@@ -362,13 +371,12 @@ def append_transaction(data_dir: Path, item_id: str, row: dict[str, str]) -> Non
 
 
 def validate_checkout(
-    state: ItemState, projected_return: date, on_date: date | None = None
+    state: ItemState, projected_return: date, on_date: date
 ) -> None:
     if state.custody == "checked_out":
         raise TransactionError("Item is already checked out.")
 
-    today = on_date or date.today()
-    conflict = reservation_on_date(state.reservations, today)
+    conflict = reservation_on_date(state.reservations, on_date)
     if conflict:
         raise TransactionError(
             "Cannot check out: item is reserved "
@@ -393,3 +401,18 @@ def validate_reserve(state: ItemState, start: date, end: date) -> None:
 def validate_cancel_reservation(state: ItemState, reservation_id: str) -> None:
     if reservation_id not in state.reservations:
         raise TransactionError(f"Unknown reservation id: {reservation_id}.")
+
+
+def empty_transaction_row() -> dict[str, str]:
+    return {column: "" for column in TRANSACTION_COLUMNS}
+
+
+def item_capabilities(state: ItemState, on_date: date) -> dict[str, bool]:
+    return {
+        "can_checkout": state.custody != "checked_out"
+        and reservation_on_date(state.reservations, on_date) is None,
+        "can_checkin": state.custody == "checked_out",
+        "can_change_condition": True,
+        "can_reserve": True,
+        "can_cancel_reservation": bool(state.reservations),
+    }

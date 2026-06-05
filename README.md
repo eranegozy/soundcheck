@@ -83,6 +83,10 @@ Timestamps use local wall time: `YYYY-MM-DD HH:MM:SS`. Dates use `YYYY-MM-DD`.
 - **Condition:** Updated on `checkin` and `change_condition` (allowed while checked out).
 - **Reservations:** `reserve` adds; `cancel_reservation` removes. Only reservations with `reserve_end` on or after today are active (past reservations are ignored). Checkout is blocked if today overlaps an active reservation.
 
+## Item operations
+
+Open an item from the inventory list. Use the forms on the item page to check out, check in, change condition, reserve, or cancel a reservation. Each action appends a row to that item's transaction file.
+
 ## Adding items
 
 Edit `data/inventory.csv`, add a row, restart the Flask server (or reload in debug mode), and refresh the page.

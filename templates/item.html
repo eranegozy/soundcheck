@@ -12,6 +12,12 @@
       <p class="message message-error">{{ error }}</p>
     {% endif %}
 
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <p class="message message-{{ category }}">{{ message }}</p>
+      {% endfor %}
+    {% endwith %}
+
     <article class="item-detail">
       <header class="item-header">
         <div class="inventory-thumb-wrap item-detail-thumb">
@@ -25,7 +31,9 @@
           <h2 class="item-title">{{ item.display_name }}</h2>
           {% if status %}
             <div class="badge-row">
-              <span class="badge badge-custody badge-custody-{{ status.custody }}">
+              <span
+                class="badge badge-custody badge-custody-{{ status.custody }}{% if status.is_past_due %} badge-past-due{% endif %}"
+              >
                 {{ status.custody_label }}
               </span>
               {% if status.condition != 'ok' %}
@@ -70,7 +78,12 @@
         </dd>
         {% if status and status.custody == 'checked_out' and status.projected_return_date %}
           <dt>Projected return</dt>
-          <dd>{{ status.projected_return_date }}</dd>
+          <dd>
+            {{ status.projected_return_date }}
+            {% if status.is_past_due %}
+              <span class="past-due-label">Past due</span>
+            {% endif %}
+          </dd>
         {% endif %}
         {% if status and status.condition != 'ok' and status.condition_description %}
           <dt>Condition notes</dt>
@@ -91,6 +104,212 @@
             {% endfor %}
           </ul>
         </section>
+      {% endif %}
+
+      {% if status and capabilities %}
+        <section class="item-section">
+          <h3>Operations</h3>
+
+          <div class="operation-forms">
+            <form
+              class="operation-form"
+              method="post"
+              action="{{ url_for('checkout', item_id=item.item_id) }}"
+              data-form-type="checkout"
+            >
+              <h4>Check out</h4>
+              <label>
+                Name
+                <input
+                  type="text"
+                  name="name"
+                  autocomplete="name"
+                  {% if capabilities.can_checkout %}required{% endif %}
+                  {% if not capabilities.can_checkout %}disabled{% endif %}
+                />
+              </label>
+              <label>
+                Kerberos
+                <input
+                  type="text"
+                  name="kerberos"
+                  {% if capabilities.can_checkout %}required{% endif %}
+                  {% if not capabilities.can_checkout %}disabled{% endif %}
+                />
+              </label>
+              <label>
+                Projected return
+                <input
+                  type="date"
+                  name="projected_return_date"
+                  {% if capabilities.can_checkout %}required{% endif %}
+                  {% if not capabilities.can_checkout %}disabled{% endif %}
+                />
+              </label>
+              <button type="submit" {% if not capabilities.can_checkout %}disabled{% endif %}>
+                Check out
+              </button>
+              {% if not capabilities.can_checkout and status.custody == 'checked_out' %}
+                <p class="form-hint">Item is already checked out.</p>
+              {% elif not capabilities.can_checkout and status.has_reservation %}
+                <p class="form-hint">Item is reserved today.</p>
+              {% endif %}
+            </form>
+
+            <form
+              class="operation-form"
+              method="post"
+              action="{{ url_for('checkin', item_id=item.item_id) }}"
+              data-form-type="checkin"
+            >
+              <h4>Check in</h4>
+              <label>
+                Name
+                <input
+                  type="text"
+                  name="name"
+                  value="{{ status.borrower_name or '' }}"
+                  autocomplete="name"
+                  {% if capabilities.can_checkin %}required{% endif %}
+                  {% if not capabilities.can_checkin %}disabled{% endif %}
+                />
+              </label>
+              <label>
+                Kerberos
+                <input
+                  type="text"
+                  name="kerberos"
+                  value="{{ status.borrower_kerberos or '' }}"
+                  {% if capabilities.can_checkin %}required{% endif %}
+                  {% if not capabilities.can_checkin %}disabled{% endif %}
+                />
+              </label>
+              <label>
+                Condition
+                <select
+                  name="condition"
+                  {% if capabilities.can_checkin %}required{% endif %}
+                  {% if not capabilities.can_checkin %}disabled{% endif %}
+                >
+                  {% for value, label in condition_choices %}
+                    <option value="{{ value }}" {% if value == status.condition %}selected{% endif %}>
+                      {{ label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>
+                Condition notes
+                <input
+                  type="text"
+                  name="condition_description"
+                  placeholder="Required if not OK"
+                  {% if not capabilities.can_checkin %}disabled{% endif %}
+                />
+              </label>
+              <button type="submit" {% if not capabilities.can_checkin %}disabled{% endif %}>
+                Check in
+              </button>
+              {% if not capabilities.can_checkin %}
+                <p class="form-hint">Item is not checked out.</p>
+              {% endif %}
+            </form>
+
+            <form
+              class="operation-form"
+              method="post"
+              action="{{ url_for('change_condition', item_id=item.item_id) }}"
+              data-form-type="change_condition"
+            >
+              <h4>Change condition</h4>
+              <label>
+                Name
+                <input type="text" name="name" autocomplete="name" required />
+              </label>
+              <label>
+                Kerberos
+                <input type="text" name="kerberos" required />
+              </label>
+              <label>
+                Condition
+                <select name="condition" required>
+                  {% for value, label in condition_choices %}
+                    <option value="{{ value }}" {% if value == status.condition %}selected{% endif %}>
+                      {{ label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>
+                Condition notes
+                <input
+                  type="text"
+                  name="condition_description"
+                  value="{{ status.condition_description or '' }}"
+                  placeholder="Required if not OK"
+                />
+              </label>
+              <button type="submit">Update condition</button>
+            </form>
+
+            <form
+              class="operation-form"
+              method="post"
+              action="{{ url_for('reserve', item_id=item.item_id) }}"
+              data-form-type="reserve"
+            >
+              <h4>Reserve</h4>
+              <label>
+                Name
+                <input type="text" name="name" autocomplete="name" required />
+              </label>
+              <label>
+                Kerberos
+                <input type="text" name="kerberos" required />
+              </label>
+              <label>
+                Start
+                <input type="date" name="reserve_start" required />
+              </label>
+              <label>
+                End
+                <input type="date" name="reserve_end" required />
+              </label>
+              <button type="submit">Reserve</button>
+            </form>
+
+            <form
+              class="operation-form"
+              method="post"
+              action="{{ url_for('cancel_reservation', item_id=item.item_id) }}"
+              data-form-type="cancel_reservation"
+            >
+              <h4>Cancel reservation</h4>
+              <label>
+                Reservation
+                <select
+                  name="reservation_id"
+                  {% if capabilities.can_cancel_reservation %}required{% endif %}
+                  {% if not capabilities.can_cancel_reservation %}disabled{% endif %}
+                >
+                  <option value="">Select…</option>
+                  {% for reservation in status.reservations %}
+                    <option value="{{ reservation.reservation_id }}">
+                      {{ reservation.reservation_id }} ({{ reservation.reserve_start }} – {{ reservation.reserve_end }})
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <button type="submit" {% if not capabilities.can_cancel_reservation %}disabled{% endif %}>
+                Cancel reservation
+              </button>
+              {% if not capabilities.can_cancel_reservation %}
+                <p class="form-hint">No active reservations.</p>
+              {% endif %}
+            </form>
+          </div>
+        </section>
+        <script src="{{ url_for('static', filename='item-forms.js') }}" defer></script>
       {% endif %}
 
       <section class="item-section">

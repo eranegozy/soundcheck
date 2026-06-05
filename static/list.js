@@ -102,9 +102,10 @@
 
     const badges = document.createElement("div");
     badges.className = "badge-row";
-    badges.appendChild(
-      createBadge(item.custody_label, `badge-custody badge-custody-${item.custody}`)
-    );
+    const custodyClass = item.is_past_due
+      ? "badge-custody badge-custody-checked_out badge-past-due"
+      : `badge-custody badge-custody-${item.custody}`;
+    badges.appendChild(createBadge(item.custody_label, custodyClass));
     if (item.condition && item.condition !== "ok") {
       badges.appendChild(
         createBadge(

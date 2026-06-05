@@ -49,6 +49,16 @@ body {
   white-space: pre-line;
 }
 
+.message-success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.message + .message {
+  margin-top: 0.75rem;
+}
+
 .inventory-controls {
   display: flex;
   flex-wrap: wrap;
@@ -172,14 +182,22 @@ a.inventory-item:hover {
   color: #1e40af;
 }
 
-.badge-condition-component_missing {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.badge-condition-broken {
+.badge-custody-checked_out.badge-past-due {
   background: #fee2e2;
   color: #991b1b;
+}
+
+.past-due-label {
+  margin-left: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #991b1b;
+}
+
+.badge-condition-component_missing,
+.badge-condition-broken {
+  background: #fef3c7;
+  color: #92400e;
 }
 
 .badge-reserved {
@@ -273,6 +291,77 @@ a.inventory-item:hover {
 .history-table th {
   background: #f8fafc;
   font-weight: 600;
+}
+
+.operation-forms {
+  display: grid;
+  gap: 1rem;
+}
+
+.operation-form {
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.operation-form h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9375rem;
+}
+
+.operation-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.operation-form input,
+.operation-form select,
+.operation-form button {
+  font: inherit;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+}
+
+.operation-form input:invalid:not(:disabled),
+.operation-form select:invalid:not(:disabled) {
+  border-color: #f87171;
+}
+
+.operation-form button {
+  justify-self: start;
+  background: #1e293b;
+  color: #f8fafc;
+  border-color: #1e293b;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.operation-form button:hover:not(:disabled) {
+  background: #334155;
+}
+
+.operation-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.operation-form input:disabled,
+.operation-form select:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+}
+
+.form-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #64748b;
 }
 
 .inventory-thumb-wrap {
