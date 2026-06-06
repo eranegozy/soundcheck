@@ -81,7 +81,7 @@ Timestamps use local wall time: `YYYY-MM-DD HH:MM:SS`. Dates use `YYYY-MM-DD`.
 
 - **Custody:** `checkout` checks out; `checkin` returns to available.
 - **Condition:** Updated on `checkin` and `change_condition` (allowed while checked out).
-- **Reservations:** `reserve` adds; `cancel_reservation` removes. Only reservations with `reserve_end` on or after today are active (past reservations are ignored). Checkout is blocked if today overlaps an active reservation.
+- **Reservations:** `reserve` adds; `cancel_reservation` removes. Only reservations with `reserve_end` on or after today are active (past reservations are ignored). Checkout is allowed during your own reservation (matching kerberos), but the checkout period (today through projected return) cannot overlap any other active reservation.
 
 ## Item operations
 

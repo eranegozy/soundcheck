@@ -10,7 +10,7 @@
     <header class="site-header">
       <h1><a href="{{ url_for('index') }}">Soundcheck Inventory</a></h1>
     </header>
-    <main class="site-main">
+    <main class="site-main {% block main_class %}{% endblock %}">
       {% block content %}{% endblock %}
     </main>
   </body>

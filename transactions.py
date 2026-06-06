@@ -370,18 +370,37 @@ def append_transaction(data_dir: Path, item_id: str, row: dict[str, str]) -> Non
         writer.writerow(normalized)
 
 
+def _kerberos_matches(stored: str, provided: str) -> bool:
+    return stored.strip().lower() == provided.strip().lower()
+
+
 def validate_checkout(
-    state: ItemState, projected_return: date, on_date: date
+    state: ItemState,
+    projected_return: date,
+    on_date: date,
+    kerberos: str,
 ) -> None:
     if state.custody == "checked_out":
         raise TransactionError("Item is already checked out.")
 
-    conflict = reservation_on_date(state.reservations, on_date)
-    if conflict:
+    if projected_return < on_date:
+        raise TransactionError("Projected return date must be on or after today.")
+
+    for reservation in state.reservations.values():
+        if not dates_overlap(
+            on_date,
+            projected_return,
+            reservation.reserve_start,
+            reservation.reserve_end,
+        ):
+            continue
+        if _kerberos_matches(reservation.kerberos, kerberos):
+            continue
         raise TransactionError(
-            "Cannot check out: item is reserved "
-            f"{conflict.reserve_start.isoformat()} through "
-            f"{conflict.reserve_end.isoformat()}."
+            "Cannot check out: checkout dates overlap a reservation held by "
+            f"{reservation.name} ({reservation.kerberos}), "
+            f"{reservation.reserve_start.isoformat()} through "
+            f"{reservation.reserve_end.isoformat()}."
         )
 
 
@@ -409,8 +428,9 @@ def empty_transaction_row() -> dict[str, str]:
 
 def item_capabilities(state: ItemState, on_date: date) -> dict[str, bool]:
     return {
-        "can_checkout": state.custody != "checked_out"
-        and reservation_on_date(state.reservations, on_date) is None,
+        "can_checkout": state.custody != "checked_out",
+        "reserved_today": reservation_on_date(state.reservations, on_date)
+        is not None,
         "can_checkin": state.custody == "checked_out",
         "can_change_condition": True,
         "can_reserve": True,

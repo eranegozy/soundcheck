@@ -123,7 +123,7 @@ def checkout(item_id: str):
         projected_return = parse_date(return_date_raw, "projected_return_date")
         on_date = date.today()
         state = load_item_state(DATA_DIR, item_id, on_date)
-        validate_checkout(state, projected_return, on_date)
+        validate_checkout(state, projected_return, on_date, kerberos)
 
         row = empty_transaction_row()
         row.update(

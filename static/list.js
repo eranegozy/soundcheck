@@ -2,13 +2,10 @@
   const dataEl = document.getElementById("inventory-data");
   const listEl = document.getElementById("inventory-list");
   const statusEl = document.getElementById("inventory-status");
-  const emptyEl = document.getElementById("inventory-empty");
   const searchEl = document.getElementById("filter-q");
   const categoryEl = document.getElementById("filter-category");
   const locationEl = document.getElementById("filter-location");
-  const sortEl = document.getElementById("filter-sort");
-  const orderEl = document.getElementById("filter-order");
-  const clearEl = document.getElementById("clear-filters");
+  const sortButtons = document.querySelectorAll(".th-sort");
 
   if (!dataEl || !listEl) {
     return;
@@ -16,6 +13,8 @@
 
   const allItems = JSON.parse(dataEl.textContent);
   const SORT_FIELDS = ["display_name", "category", "location"];
+  let sortField = "display_name";
+  let sortDesc = false;
 
   function distinct(field) {
     return [...new Set(allItems.map((item) => item[field]))].sort((a, b) =>
@@ -56,16 +55,32 @@
   }
 
   function sortItems(items) {
-    const field = SORT_FIELDS.includes(sortEl.value) ? sortEl.value : "display_name";
-    const desc = orderEl.value === "desc";
+    const field = SORT_FIELDS.includes(sortField) ? sortField : "display_name";
     const sorted = [...items];
     sorted.sort((a, b) => {
       const cmp = String(a[field]).localeCompare(String(b[field]), undefined, {
         sensitivity: "base",
       });
-      return desc ? -cmp : cmp;
+      return sortDesc ? -cmp : cmp;
     });
     return sorted;
+  }
+
+  function updateSortIndicators() {
+    sortButtons.forEach((button) => {
+      const field = button.dataset.sort;
+      const indicator = button.querySelector(".sort-indicator");
+      const active = field === sortField;
+      button.classList.toggle("th-sort--active", active);
+      if (!indicator) {
+        return;
+      }
+      if (!active) {
+        indicator.textContent = "";
+        return;
+      }
+      indicator.textContent = sortDesc ? " ↓" : " ↑";
+    });
   }
 
   function createBadge(text, className) {
@@ -75,37 +90,15 @@
     return badge;
   }
 
-  function createItemRow(item) {
-    const link = document.createElement("a");
-    link.className = "inventory-item";
-    link.href = item.item_url;
-
-    const thumbWrap = document.createElement("div");
-    thumbWrap.className = "inventory-thumb-wrap";
-
-    const img = document.createElement("img");
-    img.className = "inventory-thumb";
-    img.src = item.image_url;
-    img.alt = item.display_name;
-    thumbWrap.appendChild(img);
-
-    const summary = document.createElement("div");
-    summary.className = "inventory-summary";
-
-    const nameRow = document.createElement("div");
-    nameRow.className = "inventory-name-row";
-
-    const name = document.createElement("span");
-    name.className = "inventory-name";
-    name.textContent = item.display_name;
-    nameRow.appendChild(name);
-
+  function createBadges(item) {
     const badges = document.createElement("div");
     badges.className = "badge-row";
+
     const custodyClass = item.is_past_due
       ? "badge-custody badge-custody-checked_out badge-past-due"
       : `badge-custody badge-custody-${item.custody}`;
     badges.appendChild(createBadge(item.custody_label, custodyClass));
+
     if (item.condition && item.condition !== "ok") {
       badges.appendChild(
         createBadge(
@@ -117,21 +110,58 @@
     if (item.has_reservation) {
       badges.appendChild(createBadge("Reserved", "badge-reserved"));
     }
-    nameRow.appendChild(badges);
+    return badges;
+  }
 
-    const category = document.createElement("span");
-    category.className = "inventory-meta";
-    category.textContent = item.category;
+  function createItemRow(item) {
+    const row = document.createElement("tr");
+    row.className = "inventory-row";
+    row.tabIndex = 0;
+    row.addEventListener("click", () => {
+      window.location.href = item.item_url;
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        window.location.href = item.item_url;
+      }
+    });
 
-    const location = document.createElement("span");
-    location.className = "inventory-meta";
-    location.textContent = item.location;
+    const itemCell = document.createElement("td");
+    itemCell.className = "inventory-cell-item";
 
-    summary.append(nameRow, category, location);
-    link.append(thumbWrap, summary);
+    const itemInner = document.createElement("div");
+    itemInner.className = "inventory-item-inner";
 
-    const row = document.createElement("li");
-    row.appendChild(link);
+    const thumbWrap = document.createElement("div");
+    thumbWrap.className = "inventory-thumb-wrap";
+
+    const img = document.createElement("img");
+    img.className = "inventory-thumb";
+    img.src = item.image_url;
+    img.alt = item.display_name;
+    thumbWrap.appendChild(img);
+
+    const textCol = document.createElement("div");
+    textCol.className = "inventory-item-text";
+
+    const name = document.createElement("span");
+    name.className = "inventory-name";
+    name.textContent = item.display_name;
+
+    textCol.append(name, createBadges(item));
+    itemInner.append(thumbWrap, textCol);
+    itemCell.appendChild(itemInner);
+
+    const categoryCell = document.createElement("td");
+    categoryCell.className = "inventory-cell-category";
+    categoryCell.textContent = item.category;
+
+    const locationCell = document.createElement("td");
+    locationCell.className = "inventory-cell-location";
+    locationCell.textContent = item.location;
+
+    row.append(itemCell, categoryCell, locationCell);
     return row;
   }
 
@@ -143,32 +173,51 @@
     }
   }
 
-  function render() {
-    const filtered = sortItems(filterItems());
-    listEl.replaceChildren(...filtered.map(createItemRow));
-    updateStatus(filtered.length, allItems.length);
-    emptyEl.hidden = filtered.length > 0;
-    listEl.hidden = filtered.length === 0;
+  function createEmptyRow() {
+    const row = document.createElement("tr");
+    row.className = "inventory-empty-row";
+
+    const cell = document.createElement("td");
+    cell.colSpan = 3;
+    cell.className = "inventory-empty-cell";
+    cell.textContent = "No items match your filters.";
+    row.appendChild(cell);
+    return row;
   }
 
-  function clearFilters() {
-    searchEl.value = "";
-    categoryEl.value = "";
-    locationEl.value = "";
-    sortEl.value = "display_name";
-    orderEl.value = "asc";
+  function render() {
+    const filtered = sortItems(filterItems());
+    if (filtered.length === 0) {
+      listEl.replaceChildren(createEmptyRow());
+    } else {
+      listEl.replaceChildren(...filtered.map(createItemRow));
+    }
+    updateStatus(filtered.length, allItems.length);
+    updateSortIndicators();
+  }
+
+  function handleSortClick(field) {
+    if (sortField === field) {
+      sortDesc = !sortDesc;
+    } else {
+      sortField = field;
+      sortDesc = false;
+    }
     render();
   }
 
-  fillSelect(categoryEl, distinct("category"), "All categories");
-  fillSelect(locationEl, distinct("location"), "All locations");
+  fillSelect(categoryEl, distinct("category"), "All");
+  fillSelect(locationEl, distinct("location"), "All");
 
   searchEl.addEventListener("input", render);
   categoryEl.addEventListener("change", render);
   locationEl.addEventListener("change", render);
-  sortEl.addEventListener("change", render);
-  orderEl.addEventListener("change", render);
-  clearEl.addEventListener("click", clearFilters);
+
+  sortButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      handleSortClick(button.dataset.sort);
+    });
+  });
 
   render();
 })();
