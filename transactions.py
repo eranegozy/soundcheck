@@ -286,7 +286,7 @@ def _drop_past_reservations(state: ItemState, on_date: date) -> None:
     }
 
 
-def replay_state(rows: list[dict[str, str]], on_date: date) -> ItemState:
+def replay_actions(rows: list[dict[str, str]], on_date: date) -> ItemState:
     state = ItemState()
 
     for row in rows:
@@ -333,7 +333,7 @@ def replay_state(rows: list[dict[str, str]], on_date: date) -> ItemState:
 
 
 def load_item_state(data_dir: Path, item_id: str, on_date: date) -> ItemState:
-    return replay_state(load_transactions(data_dir, item_id), on_date)
+    return replay_actions(load_transactions(data_dir, item_id), on_date)
 
 
 def dates_overlap(start_a: date, end_a: date, start_b: date, end_b: date) -> bool:

@@ -14,6 +14,7 @@ from flask import (
 )
 
 from inventory import InventoryError, get_item, load_inventory
+from stickers import sticker_payload
 from transactions import (
     TransactionError,
     empty_transaction_row,
@@ -54,6 +55,14 @@ def enrich_item(item: dict, on_date: date) -> dict:
         **item_state_dict(state, on_date),
         "item_url": url_for("item_detail", item_id=item["item_id"]),
     }
+
+
+def _public_base_url() -> str:
+    return os.environ.get("PUBLIC_BASE_URL", request.url_root).rstrip("/")
+
+
+def _public_item_url(item_id: str) -> str:
+    return f"{_public_base_url()}{url_for('item_detail', item_id=item_id)}"
 
 
 def _require_item(item_id: str) -> dict:
@@ -291,6 +300,29 @@ def cancel_reservation(item_id: str):
         flash(str(e), "error")
 
     return redirect(url_for("item_detail", item_id=item_id))
+
+
+@app.route("/admin/print-qr")
+def admin_print_qr():
+    try:
+        items = list(reversed(load_inventory(DATA_DIR)))
+    except InventoryError as e:
+        return render_template(
+            "admin_print_qr.html",
+            stickers=[],
+            error=str(e),
+            public_base_url=_public_base_url(),
+        ), 200
+
+    stickers = [
+        sticker_payload(item, _public_item_url(item["item_id"])) for item in items
+    ]
+    return render_template(
+        "admin_print_qr.html",
+        stickers=stickers,
+        error=None,
+        public_base_url=_public_base_url(),
+    )
 
 
 @app.route("/images/<path:filename>")

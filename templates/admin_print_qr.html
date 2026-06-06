@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Print QR codes — Soundcheck{% endblock %}
+
+{% block main_class %}site-main--wide{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='print-qr.css') }}" />
+{% endblock %}
+
+{% block content %}
+  <div class="print-qr-page no-print">
+    <p class="back-link"><a href="{{ url_for('index') }}">← Back to inventory</a></p>
+
+    {% if error %}
+      <p class="message message-error">{{ error }}</p>
+    {% elif stickers %}
+      <header class="print-qr-header">
+        <div>
+          <h2 class="print-qr-title">Print QR stickers</h2>
+          <p class="print-qr-hint">
+            Select items to print 1.5″ × 1.5″ stickers. QR codes link to
+            <code>{{ public_base_url }}/items/…</code>
+          </p>
+        </div>
+        <div class="print-qr-actions">
+          <button type="button" class="btn-primary" id="print-stickers" disabled>
+            Print stickers
+          </button>
+        </div>
+      </header>
+
+      <div class="print-qr-layout">
+        <section class="print-qr-select">
+          <div class="print-qr-select-toolbar">
+            <h3 class="print-qr-section-title">Items</h3>
+            <div class="print-qr-select-actions">
+              <button type="button" class="btn-secondary btn-small" id="select-all-stickers">
+                Select all
+              </button>
+              <button type="button" class="btn-secondary btn-small" id="clear-stickers">
+                Clear
+              </button>
+            </div>
+          </div>
+          <ul class="print-qr-item-list">
+            {% for sticker in stickers %}
+              <li>
+                <label class="print-qr-item-label">
+                  <input
+                    type="checkbox"
+                    class="sticker-select"
+                    value="{{ sticker.item_id }}"
+                    data-item-id="{{ sticker.item_id }}"
+                  />
+                  <span class="print-qr-item-name">{{ sticker.display_name }}</span>
+                  <span class="print-qr-item-meta">{{ sticker.components_text }}</span>
+                </label>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+
+        <section class="print-qr-preview">
+          <h3 class="print-qr-section-title">Preview</h3>
+          <p class="print-qr-preview-empty" id="preview-empty">Select items to preview stickers.</p>
+          <div class="sticker-sheet sticker-sheet--preview" id="sticker-preview"></div>
+        </section>
+      </div>
+    {% else %}
+      <p class="message">No items in inventory.</p>
+    {% endif %}
+  </div>
+
+  {% if stickers and not error %}
+    <div class="sticker-print-area" id="sticker-print-area" hidden>
+      <div class="sticker-sheet sticker-sheet--print" id="sticker-print-sheet"></div>
+    </div>
+
+    <template id="sticker-template">
+      <div class="sticker" data-item-id="">
+        <p class="sticker-name"></p>
+        <p class="sticker-location"></p>
+        <p class="sticker-components"></p>
+        <div class="sticker-qr">
+          <div class="sticker-qr-fit"></div>
+        </div>
+      </div>
+    </template>
+
+    <script id="sticker-data" type="application/json">{{ stickers | tojson }}</script>
+    <script src="{{ url_for('static', filename='print-qr.js') }}" defer></script>
+  {% endif %}
+{% endblock %}

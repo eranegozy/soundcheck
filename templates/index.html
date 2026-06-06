@@ -2,6 +2,15 @@
 
 {% block main_class %}site-main--wide{% endblock %}
 
+{% block header_actions %}
+  <details class="admin-menu">
+    <summary class="admin-menu-trigger">Admin</summary>
+    <ul class="admin-menu-list">
+      <li><a href="{{ url_for('admin_print_qr') }}">Print QR codes</a></li>
+    </ul>
+  </details>
+{% endblock %}
+
 {% block content %}
   {% if error %}
     <p class="message message-error">{{ error }}</p>

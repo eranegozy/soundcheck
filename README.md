@@ -87,6 +87,16 @@ Timestamps use local wall time: `YYYY-MM-DD HH:MM:SS`. Dates use `YYYY-MM-DD`.
 
 Open an item from the inventory list. Use the forms on the item page to check out, check in, change condition, reserve, or cancel a reservation. Each action appends a row to that item's transaction file.
 
+## Admin: QR stickers
+
+On the inventory page, open **Admin → Print QR codes** to print 1.5″ × 1.5″ stickers for selected items. Each sticker shows the item name, location, components, and a QR code linking to that item's detail page. Items are listed newest-first (reverse of `inventory.csv` row order).
+
+Set `PUBLIC_BASE_URL` when deploying so QR codes point at your real host (e.g. `https://soundcheck.mit.edu`). If unset, the app uses the current request URL (fine for local dev).
+
+```bash
+export PUBLIC_BASE_URL=https://your-host.example.edu
+```
+
 ## Adding items
 
 Edit `data/inventory.csv`, add a row, restart the Flask server (or reload in debug mode), and refresh the page.

@@ -5,10 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Soundcheck Inventory{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    {% block extra_head %}{% endblock %}
   </head>
   <body>
     <header class="site-header">
       <h1><a href="{{ url_for('index') }}">Soundcheck Inventory</a></h1>
+      <div class="site-header-actions">{% block header_actions %}{% endblock %}</div>
     </header>
     <main class="site-main {% block main_class %}{% endblock %}">
       {% block content %}{% endblock %}
