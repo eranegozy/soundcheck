@@ -338,4 +338,6 @@ def serve_image(filename: str):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Google Cloud Run requires the app to listen on the $PORT environment variable
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, port=port)
