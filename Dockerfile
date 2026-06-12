@@ -9,7 +9,6 @@ WORKDIR /app
 
 # Copy local code to the container image
 COPY . ./
-RUN cp -r data.example data
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt

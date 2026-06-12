@@ -1,20 +1,20 @@
 import os
 from datetime import date
-from pathlib import Path
 
 from flask import (
     Flask,
+    Response,
     abort,
     flash,
     redirect,
     render_template,
     request,
-    send_from_directory,
     url_for,
 )
 
-from inventory import InventoryError, get_item, load_inventory
+from inventory import InventoryError
 from stickers import sticker_payload
+from storage import StorageError, get_store
 from transactions import (
     TransactionError,
     empty_transaction_row,
@@ -22,11 +22,8 @@ from transactions import (
     history_for_display,
     item_capabilities,
     item_state_dict,
-    load_item_state,
-    load_transactions,
     local_timestamp,
     parse_date,
-    append_transaction,
     validate_cancel_reservation,
     validate_checkin,
     validate_checkout,
@@ -38,8 +35,7 @@ from transactions import (
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
-IMAGES_DIR = DATA_DIR / "images"
+store = get_store()
 
 CONDITION_CHOICES = [
     ("ok", condition_label("ok")),
@@ -49,7 +45,7 @@ CONDITION_CHOICES = [
 
 
 def enrich_item(item: dict, on_date: date) -> dict:
-    state = load_item_state(DATA_DIR, item["item_id"], on_date)
+    state = store.load_item_state(item["item_id"], on_date)
     return {
         **item,
         **item_state_dict(state, on_date),
@@ -66,18 +62,18 @@ def _public_item_url(item_id: str) -> str:
 
 
 def _require_item(item_id: str) -> dict:
-    item = get_item(DATA_DIR, item_id)
+    item = store.get_item(item_id)
     if item is None:
         abort(404)
     return item
 
 
 def _render_item_page(item_id: str, on_date: date):
-    item = get_item(DATA_DIR, item_id)
+    item = store.get_item(item_id)
     if item is None:
         abort(404)
-    state = load_item_state(DATA_DIR, item_id, on_date)
-    transactions = load_transactions(DATA_DIR, item_id)
+    state = store.load_item_state(item_id, on_date)
+    transactions = store.load_transactions(item_id)
     return render_template(
         "item.html",
         item=item,
@@ -93,8 +89,8 @@ def _render_item_page(item_id: str, on_date: date):
 def index():
     try:
         on_date = date.today()
-        items = [enrich_item(item, on_date) for item in load_inventory(DATA_DIR)]
-    except (InventoryError, TransactionError) as e:
+        items = [enrich_item(item, on_date) for item in store.load_inventory()]
+    except (InventoryError, TransactionError, StorageError) as e:
         return render_template("index.html", items=[], error=str(e)), 200
 
     return render_template("index.html", items=items, error=None)
@@ -106,8 +102,8 @@ def item_detail(item_id: str):
         return _render_item_page(item_id, date.today())
     except InventoryError as e:
         return render_template("item.html", item=None, error=str(e)), 200
-    except TransactionError as e:
-        item = get_item(DATA_DIR, item_id)
+    except (TransactionError, StorageError) as e:
+        item = store.get_item(item_id)
         return render_template(
             "item.html",
             item=item,
@@ -131,7 +127,7 @@ def checkout(item_id: str):
             raise TransactionError("Name, kerberos, and projected return date are required.")
         projected_return = parse_date(return_date_raw, "projected_return_date")
         on_date = date.today()
-        state = load_item_state(DATA_DIR, item_id, on_date)
+        state = store.load_item_state(item_id, on_date)
         validate_checkout(state, projected_return, on_date, kerberos)
 
         row = empty_transaction_row()
@@ -144,9 +140,9 @@ def checkout(item_id: str):
                 "projected_return_date": projected_return.isoformat(),
             }
         )
-        append_transaction(DATA_DIR, item_id, row)
+        store.append_transaction(item_id, row)
         flash("Item checked out.", "success")
-    except (InventoryError, TransactionError) as e:
+    except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
 
     return redirect(url_for("item_detail", item_id=item_id))
@@ -172,7 +168,7 @@ def checkin(item_id: str):
                 "Condition notes are required when condition is not OK."
             )
 
-        state = load_item_state(DATA_DIR, item_id, date.today())
+        state = store.load_item_state(item_id, date.today())
         validate_checkin(state)
 
         row = empty_transaction_row()
@@ -186,9 +182,9 @@ def checkin(item_id: str):
                 "condition_description": description,
             }
         )
-        append_transaction(DATA_DIR, item_id, row)
+        store.append_transaction(item_id, row)
         flash("Item checked in.", "success")
-    except (InventoryError, TransactionError) as e:
+    except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
 
     return redirect(url_for("item_detail", item_id=item_id))
@@ -225,9 +221,9 @@ def change_condition(item_id: str):
                 "condition_description": description,
             }
         )
-        append_transaction(DATA_DIR, item_id, row)
+        store.append_transaction(item_id, row)
         flash("Condition updated.", "success")
-    except (InventoryError, TransactionError) as e:
+    except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
 
     return redirect(url_for("item_detail", item_id=item_id))
@@ -251,7 +247,7 @@ def reserve(item_id: str):
         if reserve_start > reserve_end:
             raise TransactionError("Reserve start must be on or before reserve end.")
 
-        state = load_item_state(DATA_DIR, item_id, date.today())
+        state = store.load_item_state(item_id, date.today())
         validate_reserve(state, reserve_start, reserve_end)
 
         reservation_id = generate_reservation_id()
@@ -267,9 +263,9 @@ def reserve(item_id: str):
                 "reserve_end": reserve_end.isoformat(),
             }
         )
-        append_transaction(DATA_DIR, item_id, row)
+        store.append_transaction(item_id, row)
         flash(f"Reservation created ({reservation_id}).", "success")
-    except (InventoryError, TransactionError) as e:
+    except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
 
     return redirect(url_for("item_detail", item_id=item_id))
@@ -283,7 +279,7 @@ def cancel_reservation(item_id: str):
     try:
         if not reservation_id:
             raise TransactionError("Reservation id is required.")
-        state = load_item_state(DATA_DIR, item_id, date.today())
+        state = store.load_item_state(item_id, date.today())
         validate_cancel_reservation(state, reservation_id)
 
         row = empty_transaction_row()
@@ -294,9 +290,9 @@ def cancel_reservation(item_id: str):
                 "reservation_id": reservation_id,
             }
         )
-        append_transaction(DATA_DIR, item_id, row)
+        store.append_transaction(item_id, row)
         flash("Reservation cancelled.", "success")
-    except (InventoryError, TransactionError) as e:
+    except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
 
     return redirect(url_for("item_detail", item_id=item_id))
@@ -305,8 +301,8 @@ def cancel_reservation(item_id: str):
 @app.route("/admin/print-qr")
 def admin_print_qr():
     try:
-        items = list(reversed(load_inventory(DATA_DIR)))
-    except InventoryError as e:
+        items = list(reversed(store.load_inventory()))
+    except (InventoryError, StorageError) as e:
         return render_template(
             "admin_print_qr.html",
             stickers=[],
@@ -330,11 +326,12 @@ def serve_image(filename: str):
     if ".." in filename or filename.startswith("/"):
         abort(404)
 
-    safe_path = (IMAGES_DIR / filename).resolve()
-    if not safe_path.is_file() or IMAGES_DIR.resolve() not in safe_path.parents:
+    try:
+        data, mime_type = store.get_image_bytes(filename)
+    except StorageError:
         abort(404)
 
-    return send_from_directory(IMAGES_DIR, filename)
+    return Response(data, mimetype=mime_type)
 
 
 if __name__ == "__main__":

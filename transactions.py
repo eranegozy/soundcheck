@@ -1,10 +1,10 @@
 """Per-item transaction logs and derived loan/condition state."""
 
 import csv
+import io
 import secrets
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from pathlib import Path
 
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 DATE_FORMAT = "%Y-%m-%d"
@@ -57,14 +57,6 @@ class ItemState:
     condition: str = "ok"
     condition_description: str | None = None
     reservations: dict[str, Reservation] = field(default_factory=dict)
-
-
-def transactions_dir(data_dir: Path) -> Path:
-    return data_dir / "transactions"
-
-
-def transaction_path(data_dir: Path, item_id: str) -> Path:
-    return transactions_dir(data_dir) / f"{item_id}.csv"
 
 
 def local_timestamp(when: datetime | None = None) -> str:
@@ -261,21 +253,44 @@ def _validate_condition_row(row: dict[str, str], where: str) -> None:
         )
 
 
-def load_transactions(data_dir: Path, item_id: str) -> list[dict[str, str]]:
-    path = transaction_path(data_dir, item_id)
-    if not path.is_file():
+def _normalize_row(row: dict[str, str]) -> dict[str, str]:
+    return {column: (row.get(column) or "").strip() for column in TRANSACTION_COLUMNS}
+
+
+def parse_transactions_csv(text: str) -> list[dict[str, str]]:
+    if not text.strip():
         return []
 
     rows: list[dict[str, str]] = []
-    with path.open(newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        _validate_header(reader.fieldnames)
+    reader = csv.DictReader(io.StringIO(text))
+    _validate_header(reader.fieldnames)
 
-        for line_number, row in enumerate(reader, start=2):
-            _validate_row(row, line_number)
-            rows.append({column: (row.get(column) or "").strip() for column in TRANSACTION_COLUMNS})
+    for line_number, row in enumerate(reader, start=2):
+        _validate_row(row, line_number)
+        rows.append(_normalize_row(row))
 
     return rows
+
+
+def serialize_transactions_csv(rows: list[dict[str, str]]) -> str:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=TRANSACTION_COLUMNS)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(_normalize_row(row))
+    return buffer.getvalue()
+
+
+def append_row_to_csv(existing: str | None, row: dict[str, str]) -> str:
+    normalized = _normalize_row(row)
+    _validate_row(normalized)
+
+    if not existing or not existing.strip():
+        return serialize_transactions_csv([normalized])
+
+    rows = parse_transactions_csv(existing)
+    rows.append(normalized)
+    return serialize_transactions_csv(rows)
 
 
 def _drop_past_reservations(state: ItemState, on_date: date) -> None:
@@ -332,8 +347,8 @@ def replay_actions(rows: list[dict[str, str]], on_date: date) -> ItemState:
     return state
 
 
-def load_item_state(data_dir: Path, item_id: str, on_date: date) -> ItemState:
-    return replay_actions(load_transactions(data_dir, item_id), on_date)
+def load_item_state(transactions: list[dict[str, str]], on_date: date) -> ItemState:
+    return replay_actions(transactions, on_date)
 
 
 def dates_overlap(start_a: date, end_a: date, start_b: date, end_b: date) -> bool:
@@ -353,21 +368,6 @@ def reservation_on_date(
     reservations: dict[str, Reservation], when: date
 ) -> Reservation | None:
     return reservation_overlap(reservations, when, when)
-
-
-def append_transaction(data_dir: Path, item_id: str, row: dict[str, str]) -> None:
-    normalized = {column: row.get(column, "").strip() for column in TRANSACTION_COLUMNS}
-    _validate_row(normalized)
-
-    path = transaction_path(data_dir, item_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_header = not path.exists() or path.stat().st_size == 0
-
-    with path.open("a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=TRANSACTION_COLUMNS)
-        if write_header:
-            writer.writeheader()
-        writer.writerow(normalized)
 
 
 def _kerberos_matches(stored: str, provided: str) -> bool:

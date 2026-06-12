@@ -1,7 +1,4 @@
-"""Load inventory from CSV files."""
-
-import csv
-from pathlib import Path
+"""Inventory parsing and validation."""
 
 COLUMNS = (
     "item_id",
@@ -59,65 +56,68 @@ def parse_components(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(";") if part.strip()]
 
 
-def load_inventory(data_dir: Path) -> list[dict]:
-    csv_path = data_dir / "inventory.csv"
-    if not csv_path.is_file():
-        raise InventoryError(f"inventory file not found: {csv_path}")
+def _row_dict(headers: list[str], values: list[str]) -> dict[str, str]:
+    padded = values + [""] * (len(headers) - len(values))
+    return {
+        header: (padded[index] or "").strip()
+        for index, header in enumerate(headers)
+    }
+
+
+def parse_inventory_rows(values: list[list[str]]) -> list[dict]:
+    if not values:
+        raise InventoryError("inventory sheet is empty")
+
+    headers = [header.strip() for header in values[0]]
+    missing_columns = set(COLUMNS) - set(headers)
+    if missing_columns:
+        raise InventoryError(
+            "inventory missing columns: " + ", ".join(sorted(missing_columns))
+        )
 
     items: list[dict] = []
     item_id_lines: dict[str, list[int]] = {}
     identity_lines: dict[tuple[str, str, str], list[int]] = {}
 
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or []
+    for line_number, raw_row in enumerate(values[1:], start=2):
+        row = _row_dict(headers, raw_row)
+        for column in COLUMNS:
+            if not (row.get(column) or "").strip():
+                raise InventoryError(
+                    f"inventory line {line_number}: missing value for '{column}'"
+                )
 
-        missing_columns = set(COLUMNS) - set(fieldnames)
-        if missing_columns:
-            raise InventoryError(
-                "inventory.csv missing columns: "
-                + ", ".join(sorted(missing_columns))
-            )
+        item_id = row["item_id"].strip()
+        brand = row["brand"].strip()
+        model = row["model"].strip()
+        number = row["number"].strip()
+        image = row["image"].strip()
 
-        for line_number, row in enumerate(reader, start=2):
-            for column in COLUMNS:
-                if not (row.get(column) or "").strip():
-                    raise InventoryError(
-                        f"inventory.csv line {line_number}: "
-                        f"missing value for '{column}'"
-                    )
+        item_id_lines.setdefault(item_id, []).append(line_number)
+        identity_lines.setdefault((brand, model, number), []).append(line_number)
 
-            item_id = row["item_id"].strip()
-            brand = row["brand"].strip()
-            model = row["model"].strip()
-            number = row["number"].strip()
-            image = row["image"].strip()
-
-            item_id_lines.setdefault(item_id, []).append(line_number)
-            identity_lines.setdefault((brand, model, number), []).append(line_number)
-
-            items.append(
-                {
-                    "item_id": item_id,
-                    "brand": brand,
-                    "model": model,
-                    "number": number,
-                    "serial": row["serial"].strip(),
-                    "category": row["category"].strip(),
-                    "location": row["location"].strip(),
-                    "components": parse_components(row["components"]),
-                    "image": image,
-                    "display_name": display_name(brand, model, number),
-                    "image_url": f"/images/{image}",
-                }
-            )
+        items.append(
+            {
+                "item_id": item_id,
+                "brand": brand,
+                "model": model,
+                "number": number,
+                "serial": row["serial"].strip(),
+                "category": row["category"].strip(),
+                "location": row["location"].strip(),
+                "components": parse_components(row["components"]),
+                "image": image,
+                "display_name": display_name(brand, model, number),
+                "image_url": f"/images/{image}",
+            }
+        )
 
     _validate_uniqueness(item_id_lines, identity_lines)
     return items
 
 
-def get_item(data_dir: Path, item_id: str) -> dict | None:
-    for item in load_inventory(data_dir):
+def get_item(items: list[dict], item_id: str) -> dict | None:
+    for item in items:
         if item["item_id"] == item_id:
             return item
     return None
