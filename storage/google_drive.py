@@ -3,8 +3,6 @@
 import io
 import ssl
 import threading
-from collections.abc import Callable
-from dataclasses import dataclass
 
 import google.auth
 from google.auth.exceptions import DefaultCredentialsError
@@ -17,23 +15,11 @@ SCOPES = (
     "https://www.googleapis.com/auth/spreadsheets.readonly",
 )
 
-MAX_WRITE_RETRIES = 5
 DRIVE_API_RETRIES = 3
 
 
 class StorageError(Exception):
     """Raised when Google API operations fail."""
-
-
-class ConcurrentUpdateError(Exception):
-    """Raised when a file changed between read and write."""
-
-
-@dataclass(frozen=True)
-class _DriveFile:
-    file_id: str | None
-    name: str
-    md5_checksum: str | None
 
 
 class GoogleStorage:
@@ -172,26 +158,6 @@ class GoogleStorage:
                     raise StorageError(f"Drive download failed: {exc}") from exc
         raise StorageError(f"Drive download failed: {last_exc}")
 
-    def _file_md5_checksum(self, file_id: str) -> str | None:
-        request = self._drive_service().files().get(
-            fileId=file_id,
-            fields="md5Checksum",
-            supportsAllDrives=True,
-        )
-        result = self._drive_execute(request)
-        return result.get("md5Checksum")
-
-    def _read_file_meta(
-        self, folder_id: str, filename: str, *, for_update: bool = False
-    ) -> tuple[_DriveFile, str | None]:
-        files = self._find_files(folder_id, filename)
-        if not files:
-            return _DriveFile(file_id=None, name=filename, md5_checksum=None), None
-        file_id = files[0]["id"]
-        md5_checksum = self._file_md5_checksum(file_id) if for_update else None
-        content = self._download_bytes(file_id).decode("utf-8")
-        return _DriveFile(file_id, filename, md5_checksum), content
-
     def _create_file(
         self, parent_id: str, name: str, content: str, *, mimetype: str
     ) -> None:
@@ -217,19 +183,7 @@ class GoogleStorage:
                 )
             ) from exc
 
-    def _update_file(
-        self,
-        file_id: str,
-        expected_md5: str | None,
-        content: str,
-        *,
-        mimetype: str,
-    ) -> None:
-        if expected_md5 is not None:
-            current_md5 = self._file_md5_checksum(file_id)
-            if current_md5 != expected_md5:
-                raise ConcurrentUpdateError()
-
+    def _update_file(self, file_id: str, content: str, *, mimetype: str) -> None:
         media = MediaIoBaseUpload(
             io.BytesIO(content.encode("utf-8")),
             mimetype=mimetype,
@@ -282,8 +236,10 @@ class GoogleStorage:
         return response.get("values", [])
 
     def read_text_file(self, folder_id: str, filename: str) -> str | None:
-        _, content = self._read_file_meta(folder_id, filename)
-        return content
+        files = self._find_files(folder_id, filename)
+        if not files:
+            return None
+        return self._download_bytes(files[0]["id"]).decode("utf-8")
 
     def read_bytes_file(self, folder_id: str, filename: str) -> bytes:
         files = self._find_files(folder_id, filename)
@@ -291,40 +247,19 @@ class GoogleStorage:
             raise StorageError(f"File not found in Drive: {filename!r}")
         return self._download_bytes(files[0]["id"])
 
-    def write_text_file(
+    def put_text_file(
         self,
         folder_id: str,
         filename: str,
-        transform: Callable[[str | None], str],
+        content: str,
         *,
         lock_key: str | None = None,
         mimetype: str = "text/plain",
     ) -> None:
         key = lock_key or f"{folder_id}/{filename}"
         with self._write_lock(key):
-            for _ in range(MAX_WRITE_RETRIES):
-                file_meta, content = self._read_file_meta(
-                    folder_id, filename, for_update=True
-                )
-                new_content = transform(content)
-                if file_meta.file_id is None:
-                    self._create_file(
-                        folder_id,
-                        filename,
-                        new_content,
-                        mimetype=mimetype,
-                    )
-                    return
-                try:
-                    self._update_file(
-                        file_meta.file_id,
-                        file_meta.md5_checksum,
-                        new_content,
-                        mimetype=mimetype,
-                    )
-                    return
-                except ConcurrentUpdateError:
-                    continue
-            raise StorageError(
-                f"Concurrent update conflict while writing {filename!r}"
-            )
+            files = self._find_files(folder_id, filename)
+            if not files:
+                self._create_file(folder_id, filename, content, mimetype=mimetype)
+                return
+            self._update_file(files[0]["id"], content, mimetype=mimetype)

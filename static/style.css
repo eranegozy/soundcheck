@@ -98,6 +98,26 @@ body {
   background: #f1f5f9;
 }
 
+.admin-menu-list form {
+  margin: 0;
+}
+
+.admin-menu-list button {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: #1e293b;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.admin-menu-list button:hover {
+  background: #f1f5f9;
+}
+
 .site-main {
   max-width: 48rem;
   margin: 0 auto;

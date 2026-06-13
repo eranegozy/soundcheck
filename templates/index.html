@@ -6,12 +6,23 @@
   <details class="admin-menu">
     <summary class="admin-menu-trigger">Admin</summary>
     <ul class="admin-menu-list">
+      <li>
+        <form method="post" action="{{ url_for('admin_refresh_inventory') }}">
+          <button type="submit">Refresh inventory</button>
+        </form>
+      </li>
       <li><a href="{{ url_for('admin_print_qr') }}">Print QR codes</a></li>
     </ul>
   </details>
 {% endblock %}
 
 {% block content %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="message message-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+
   {% if error %}
     <p class="message message-error">{{ error }}</p>
   {% endif %}

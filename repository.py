@@ -2,15 +2,17 @@
 
 import mimetypes
 import os
+import threading
 from datetime import date
 
-from inventory import InventoryError, get_item, parse_inventory_rows
+from inventory import parse_inventory_rows
 from storage import GoogleStorage, StorageError
 from transactions import (
     TransactionError,
     append_row_to_csv,
     parse_transactions_csv,
     replay_actions,
+    serialize_transactions_csv,
 )
 
 _repository: "SoundcheckRepository | None" = None
@@ -38,6 +40,14 @@ class SoundcheckRepository:
         self._images_folder_id = images_folder_id
         self._sheet_id = sheet_id
         self._sheet_range = sheet_range
+
+        self._lock = threading.Lock()
+        self._inventory: list[dict] | None = None
+        self._items_by_id: dict[str, dict] = {}
+        self._transactions: dict[str, list[dict[str, str]]] = {}
+        self._images: dict[str, tuple[bytes, str]] = {}
+        self._transaction_locks: dict[str, threading.Lock] = {}
+        self._transaction_locks_guard = threading.Lock()
 
     @classmethod
     def from_env(cls, google: GoogleStorage | None = None) -> "SoundcheckRepository":
@@ -70,48 +80,94 @@ class SoundcheckRepository:
             sheet_range=sheet_range or "Inventory!A:I",
         )
 
-    def load_inventory(self) -> list[dict]:
+    def _fetch_inventory(self) -> list[dict]:
         values = self._google.read_sheet_values(self._sheet_id, self._sheet_range)
-        return parse_inventory_rows(values)
+        items = parse_inventory_rows(values)
+        self._inventory = items
+        self._items_by_id = {item["item_id"]: item for item in items}
+        return items
+
+    def load_inventory(self) -> list[dict]:
+        with self._lock:
+            if self._inventory is not None:
+                return self._inventory
+            return self._fetch_inventory()
+
+    def refresh_inventory(self) -> list[dict]:
+        with self._lock:
+            self._inventory = None
+            self._items_by_id = {}
+            self._images = {}
+            return self._fetch_inventory()
+
+    def _transaction_lock(self, item_id: str) -> threading.Lock:
+        with self._transaction_locks_guard:
+            lock = self._transaction_locks.get(item_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._transaction_locks[item_id] = lock
+            return lock
 
     def get_item(self, item_id: str) -> dict | None:
-        return get_item(self.load_inventory(), item_id)
+        with self._lock:
+            if self._inventory is None:
+                self._fetch_inventory()
+            return self._items_by_id.get(item_id)
 
     def load_transactions(self, item_id: str) -> list[dict[str, str]]:
+        with self._lock:
+            if item_id in self._transactions:
+                return self._transactions[item_id]
+
         content = self._google.read_text_file(
             self._transactions_folder_id,
             f"{item_id}.csv",
         )
-        if content is None:
-            return []
-        return parse_transactions_csv(content)
+        rows = parse_transactions_csv(content) if content else []
+
+        with self._lock:
+            self._transactions[item_id] = rows
+            return rows
 
     def load_item_state(self, item_id: str, on_date: date):
         return replay_actions(self.load_transactions(item_id), on_date)
 
     def append_transaction(self, item_id: str, row: dict[str, str]) -> None:
-        filename = f"{item_id}.csv"
-
-        def transform(existing: str | None) -> str:
+        with self._transaction_lock(item_id):
+            rows = self.load_transactions(item_id)
+            existing_csv = serialize_transactions_csv(rows) if rows else None
             try:
-                return append_row_to_csv(existing, row)
+                new_csv = append_row_to_csv(existing_csv, row)
             except TransactionError as exc:
-                raise StorageError(
-                    f"Invalid transaction row for {item_id}"
-                ) from exc
+                raise StorageError(f"Invalid transaction row for {item_id}") from exc
 
-        self._google.write_text_file(
-            self._transactions_folder_id,
-            filename,
-            transform,
-            lock_key=item_id,
-            mimetype="text/csv",
-        )
+            new_rows = parse_transactions_csv(new_csv)
+            filename = f"{item_id}.csv"
+
+            self._google.put_text_file(
+                self._transactions_folder_id,
+                filename,
+                new_csv,
+                lock_key=item_id,
+                mimetype="text/csv",
+            )
+
+            with self._lock:
+                self._transactions[item_id] = new_rows
 
     def get_image_bytes(self, filename: str) -> tuple[bytes, str]:
+        with self._lock:
+            cached = self._images.get(filename)
+            if cached is not None:
+                return cached
+
         data = self._google.read_bytes_file(self._images_folder_id, filename)
         mime_type, _ = mimetypes.guess_type(filename)
-        return data, mime_type or "application/octet-stream"
+        result = (data, mime_type or "application/octet-stream")
+
+        with self._lock:
+            self._images[filename] = result
+            return result
 
 
 def get_repository() -> SoundcheckRepository:

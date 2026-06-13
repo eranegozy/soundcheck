@@ -96,7 +96,9 @@ flask --app app run --debug
 
 Open http://127.0.0.1:5000/
 
-The listing page filters and sorts inventory in the browser (search, category, location). All items are loaded from Google Sheets on each request.
+The listing page filters and sorts inventory in the browser (search, category, location). Inventory, transaction history, and images are cached in memory after the first load to reduce Google API calls.
+
+After editing the inventory Google Sheet externally, use **Admin → Refresh inventory** on the inventory page to reload the sheet and clear cached images.
 
 ## Data layout
 
@@ -159,21 +161,26 @@ Timestamps use local wall time: `YYYY-MM-DD HH:MM:SS`. Dates use `YYYY-MM-DD`.
 - **Condition:** Updated on `checkin` and `change_condition` (allowed while checked out).
 - **Reservations:** `reserve` adds; `cancel_reservation` removes. Only reservations with `reserve_end` on or after today are active (past reservations are ignored). Checkout is allowed during your own reservation (matching kerberos), but the checkout period (today through projected return) cannot overlap any other active reservation.
 
-Concurrent appends use read-modify-write with `md5Checksum` checks and per-item locks.
+Concurrent appends update the in-memory transaction cache and write the full CSV to Drive (single-server; per-item locks).
 
 ## Item operations
 
 Open an item from the inventory list. Use the forms on the item page to check out, check in, change condition, reserve, or cancel a reservation. Each action appends a row to that item's transaction file on Drive.
 
-## Admin: QR stickers
+## Admin
 
-On the inventory page, open **Admin → Print QR codes** to print 1.5″ × 1.5″ stickers for selected items. Each sticker shows the item name, location, components, and a QR code linking to that item's detail page. Items are listed newest-first (reverse of sheet row order).
+On the inventory page, open **Admin** for:
+
+- **Refresh inventory** — reload the Google Sheet and clear cached images (use after external sheet or image changes)
+- **Print QR codes** — print 1.5″ × 1.5″ stickers for selected items
+
+Each sticker shows the item name, location, components, and a QR code linking to that item's detail page. Items are listed newest-first (reverse of sheet row order).
 
 Set `PUBLIC_BASE_URL` when deploying so QR codes point at your real host (e.g. `https://soundcheck.mit.edu`). If unset, the app uses the current request URL (fine for local dev).
 
 ## Adding items
 
-Add a row to the inventory Google Sheet and refresh the page. No app restart is required.
+Add a row to the inventory Google Sheet, then choose **Admin → Refresh inventory** on the inventory page.
 
 ## Migration from local files
 

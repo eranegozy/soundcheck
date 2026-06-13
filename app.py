@@ -299,6 +299,17 @@ def cancel_reservation(item_id: str):
     return redirect(url_for("item_detail", item_id=item_id))
 
 
+@app.post("/admin/refresh-inventory")
+def admin_refresh_inventory():
+    try:
+        repo.refresh_inventory()
+        flash("Inventory refreshed from Google Sheet.", "success")
+    except (InventoryError, StorageError) as e:
+        flash(str(e), "error")
+
+    return redirect(url_for("index"))
+
+
 @app.route("/admin/print-qr")
 def admin_print_qr():
     try:
