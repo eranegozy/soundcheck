@@ -1,12 +1,10 @@
-"""Google Drive and Sheets storage backend."""
+"""Google Drive and Sheets API client."""
 
 import io
-import mimetypes
-import os
 import ssl
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
 
 import google.auth
 from google.auth.exceptions import DefaultCredentialsError
@@ -14,36 +12,21 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
-from inventory import InventoryError, get_item, parse_inventory_rows
-from transactions import (
-    append_row_to_csv,
-    parse_transactions_csv,
-    replay_actions,
-)
-
 SCOPES = (
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
 )
 
-MAX_APPEND_RETRIES = 5
+MAX_WRITE_RETRIES = 5
 DRIVE_API_RETRIES = 3
 
 
 class StorageError(Exception):
-    """Raised when storage operations fail."""
+    """Raised when Google API operations fail."""
 
 
 class ConcurrentUpdateError(Exception):
-    """Raised when a transaction file changed between read and write."""
-
-
-def _normalize_drive_id(value: str) -> str:
-    """Accept a bare folder ID or a full Drive folder URL."""
-    value = value.strip()
-    if "/folders/" in value:
-        return value.split("/folders/", 1)[1].split("/")[0].split("?")[0]
-    return value
+    """Raised when a file changed between read and write."""
 
 
 @dataclass(frozen=True)
@@ -53,56 +36,14 @@ class _DriveFile:
     md5_checksum: str | None
 
 
-class GoogleDriveStore:
-    def __init__(
-        self,
-        *,
-        transactions_folder_id: str,
-        images_folder_id: str,
-        sheet_id: str,
-        sheet_range: str,
-    ) -> None:
-        self._transactions_folder_id = transactions_folder_id
-        self._images_folder_id = images_folder_id
-        self._sheet_id = sheet_id
-        self._sheet_range = sheet_range
-
+class GoogleStorage:
+    def __init__(self) -> None:
         self._credentials_obj = None
         self._drive = None
         self._sheets = None
         self._drive_api_lock = threading.Lock()
-        self._item_locks: dict[str, threading.Lock] = {}
-        self._item_locks_guard = threading.Lock()
-
-    @classmethod
-    def from_env(cls) -> GoogleDriveStore:
-        transactions_folder_id = os.environ.get(
-            "GOOGLE_DRIVE_TRANSACTIONS_FOLDER_ID", ""
-        ).strip()
-        images_folder_id = os.environ.get("GOOGLE_DRIVE_IMAGES_FOLDER_ID", "").strip()
-        sheet_id = os.environ.get("GOOGLE_SHEET_ID", "").strip()
-        sheet_range = os.environ.get("GOOGLE_SHEET_RANGE", "Inventory!A:I").strip()
-
-        missing = [
-            name
-            for name, value in (
-                ("GOOGLE_DRIVE_TRANSACTIONS_FOLDER_ID", transactions_folder_id),
-                ("GOOGLE_DRIVE_IMAGES_FOLDER_ID", images_folder_id),
-                ("GOOGLE_SHEET_ID", sheet_id),
-            )
-            if not value
-        ]
-        if missing:
-            raise StorageError(
-                "Missing required environment variables: " + ", ".join(missing)
-            )
-
-        return cls(
-            transactions_folder_id=_normalize_drive_id(transactions_folder_id),
-            images_folder_id=_normalize_drive_id(images_folder_id),
-            sheet_id=sheet_id,
-            sheet_range=sheet_range or "Inventory!A:I",
-        )
+        self._write_locks: dict[str, threading.Lock] = {}
+        self._write_locks_guard = threading.Lock()
 
     @staticmethod
     def _drive_error_message(exc: HttpError, context: str) -> str:
@@ -114,9 +55,8 @@ class GoogleDriveStore:
         ):
             return (
                 f"{context}: service accounts cannot create new files in a personal "
-                "My Drive folder. Put GOOGLE_DRIVE_TRANSACTIONS_FOLDER_ID in a "
-                "Shared drive and add the service account as Content manager (or "
-                "Contributor). See README Google Cloud setup."
+                "My Drive folder. Use a Shared drive folder and add the service "
+                "account as Content manager (or Contributor)."
             )
         parts = [context, f"HTTP {exc.resp.status}"]
         if detail:
@@ -156,12 +96,12 @@ class GoogleDriveStore:
             )
         return self._sheets
 
-    def _item_lock(self, item_id: str) -> threading.Lock:
-        with self._item_locks_guard:
-            lock = self._item_locks.get(item_id)
+    def _write_lock(self, key: str) -> threading.Lock:
+        with self._write_locks_guard:
+            lock = self._write_locks.get(key)
             if lock is None:
                 lock = threading.Lock()
-                self._item_locks[item_id] = lock
+                self._write_locks[key] = lock
             return lock
 
     def _drive_execute(self, request):
@@ -241,11 +181,10 @@ class GoogleDriveStore:
         result = self._drive_execute(request)
         return result.get("md5Checksum")
 
-    def _download_transaction_csv(
-        self, item_id: str, *, for_update: bool = False
+    def _read_file_meta(
+        self, folder_id: str, filename: str, *, for_update: bool = False
     ) -> tuple[_DriveFile, str | None]:
-        filename = f"{item_id}.csv"
-        files = self._find_files(self._transactions_folder_id, filename)
+        files = self._find_files(folder_id, filename)
         if not files:
             return _DriveFile(file_id=None, name=filename, md5_checksum=None), None
         file_id = files[0]["id"]
@@ -253,10 +192,12 @@ class GoogleDriveStore:
         content = self._download_bytes(file_id).decode("utf-8")
         return _DriveFile(file_id, filename, md5_checksum), content
 
-    def _create_file(self, parent_id: str, name: str, content: str) -> None:
+    def _create_file(
+        self, parent_id: str, name: str, content: str, *, mimetype: str
+    ) -> None:
         media = MediaIoBaseUpload(
             io.BytesIO(content.encode("utf-8")),
-            mimetype="text/csv",
+            mimetype=mimetype,
             resumable=False,
         )
         body = {"name": name, "parents": [parent_id]}
@@ -277,7 +218,12 @@ class GoogleDriveStore:
             ) from exc
 
     def _update_file(
-        self, file_id: str, expected_md5: str | None, content: str
+        self,
+        file_id: str,
+        expected_md5: str | None,
+        content: str,
+        *,
+        mimetype: str,
     ) -> None:
         if expected_md5 is not None:
             current_md5 = self._file_md5_checksum(file_id)
@@ -286,7 +232,7 @@ class GoogleDriveStore:
 
         media = MediaIoBaseUpload(
             io.BytesIO(content.encode("utf-8")),
-            mimetype="text/csv",
+            mimetype=mimetype,
             resumable=False,
         )
         request = self._drive_service().files().update(
@@ -305,18 +251,18 @@ class GoogleDriveStore:
                 )
             ) from exc
 
-    def load_inventory(self) -> list[dict]:
+    def read_sheet_values(self, spreadsheet_id: str, range_name: str) -> list[list[str]]:
         try:
-            response = (
+            request = (
                 self._sheets_service()
                 .spreadsheets()
                 .values()
                 .get(
-                    spreadsheetId=self._sheet_id,
-                    range=self._sheet_range,
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name,
                 )
-                .execute()
             )
+            response = self._drive_execute(request)
         except HttpError as exc:
             if exc.resp.status == 403 and "ACCESS_TOKEN_SCOPE_INSUFFICIENT" in (
                 exc.content.decode() if exc.content else ""
@@ -327,65 +273,58 @@ class GoogleDriveStore:
                     "--scopes=https://www.googleapis.com/auth/drive,"
                     "https://www.googleapis.com/auth/spreadsheets.readonly"
                 ) from exc
-            raise StorageError("Failed to load inventory from Google Sheet") from exc
-
-        values = response.get("values", [])
-        try:
-            return parse_inventory_rows(values)
-        except InventoryError:
-            raise
-
-    def get_item(self, item_id: str) -> dict | None:
-        return get_item(self.load_inventory(), item_id)
-
-    def load_transactions(self, item_id: str) -> list[dict[str, str]]:
-        _, content = self._download_transaction_csv(item_id)
-        if content is None:
-            return []
-        return parse_transactions_csv(content)
-
-    def load_item_state(self, item_id: str, on_date: date):
-        return replay_actions(self.load_transactions(item_id), on_date)
-
-    def append_transaction(self, item_id: str, row: dict[str, str]) -> None:
-        with self._item_lock(item_id):
-            for _ in range(MAX_APPEND_RETRIES):
-                file_meta, content = self._download_transaction_csv(
-                    item_id, for_update=True
+            raise StorageError(
+                self._drive_error_message(
+                    exc,
+                    f"Sheets read failed for spreadsheet {spreadsheet_id!r}",
                 )
-                try:
-                    new_content = append_row_to_csv(content, row)
-                except Exception as exc:
-                    raise StorageError(
-                        f"Invalid transaction row for {item_id}"
-                    ) from exc
+            ) from exc
+        return response.get("values", [])
 
+    def read_text_file(self, folder_id: str, filename: str) -> str | None:
+        _, content = self._read_file_meta(folder_id, filename)
+        return content
+
+    def read_bytes_file(self, folder_id: str, filename: str) -> bytes:
+        files = self._find_files(folder_id, filename)
+        if not files:
+            raise StorageError(f"File not found in Drive: {filename!r}")
+        return self._download_bytes(files[0]["id"])
+
+    def write_text_file(
+        self,
+        folder_id: str,
+        filename: str,
+        transform: Callable[[str | None], str],
+        *,
+        lock_key: str | None = None,
+        mimetype: str = "text/plain",
+    ) -> None:
+        key = lock_key or f"{folder_id}/{filename}"
+        with self._write_lock(key):
+            for _ in range(MAX_WRITE_RETRIES):
+                file_meta, content = self._read_file_meta(
+                    folder_id, filename, for_update=True
+                )
+                new_content = transform(content)
                 if file_meta.file_id is None:
                     self._create_file(
-                        self._transactions_folder_id,
-                        file_meta.name,
+                        folder_id,
+                        filename,
                         new_content,
+                        mimetype=mimetype,
                     )
                     return
-
                 try:
                     self._update_file(
-                        file_meta.file_id, file_meta.md5_checksum, new_content
+                        file_meta.file_id,
+                        file_meta.md5_checksum,
+                        new_content,
+                        mimetype=mimetype,
                     )
                     return
                 except ConcurrentUpdateError:
                     continue
-
             raise StorageError(
-                f"Concurrent update conflict while appending transaction for {item_id}"
+                f"Concurrent update conflict while writing {filename!r}"
             )
-
-    def get_image_bytes(self, filename: str) -> tuple[bytes, str]:
-        files = self._find_files(self._images_folder_id, filename)
-        if not files:
-            raise StorageError(f"Image not found in Drive: {filename}")
-
-        file_id = files[0]["id"]
-        data = self._download_bytes(file_id)
-        mime_type, _ = mimetypes.guess_type(filename)
-        return data, mime_type or "application/octet-stream"

@@ -13,8 +13,9 @@ from flask import (
 )
 
 from inventory import InventoryError
+from repository import get_repository
 from stickers import sticker_payload
-from storage import StorageError, get_store
+from storage import StorageError
 from transactions import (
     TransactionError,
     empty_transaction_row,
@@ -35,7 +36,7 @@ from transactions import (
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
 
-store = get_store()
+repo = get_repository()
 
 CONDITION_CHOICES = [
     ("ok", condition_label("ok")),
@@ -45,7 +46,7 @@ CONDITION_CHOICES = [
 
 
 def enrich_item(item: dict, on_date: date) -> dict:
-    state = store.load_item_state(item["item_id"], on_date)
+    state = repo.load_item_state(item["item_id"], on_date)
     return {
         **item,
         **item_state_dict(state, on_date),
@@ -62,18 +63,18 @@ def _public_item_url(item_id: str) -> str:
 
 
 def _require_item(item_id: str) -> dict:
-    item = store.get_item(item_id)
+    item = repo.get_item(item_id)
     if item is None:
         abort(404)
     return item
 
 
 def _render_item_page(item_id: str, on_date: date):
-    item = store.get_item(item_id)
+    item = repo.get_item(item_id)
     if item is None:
         abort(404)
-    state = store.load_item_state(item_id, on_date)
-    transactions = store.load_transactions(item_id)
+    state = repo.load_item_state(item_id, on_date)
+    transactions = repo.load_transactions(item_id)
     return render_template(
         "item.html",
         item=item,
@@ -89,7 +90,7 @@ def _render_item_page(item_id: str, on_date: date):
 def index():
     try:
         on_date = date.today()
-        items = [enrich_item(item, on_date) for item in store.load_inventory()]
+        items = [enrich_item(item, on_date) for item in repo.load_inventory()]
     except (InventoryError, TransactionError, StorageError) as e:
         return render_template("index.html", items=[], error=str(e)), 200
 
@@ -103,7 +104,7 @@ def item_detail(item_id: str):
     except InventoryError as e:
         return render_template("item.html", item=None, error=str(e)), 200
     except (TransactionError, StorageError) as e:
-        item = store.get_item(item_id)
+        item = repo.get_item(item_id)
         return render_template(
             "item.html",
             item=item,
@@ -127,7 +128,7 @@ def checkout(item_id: str):
             raise TransactionError("Name, kerberos, and projected return date are required.")
         projected_return = parse_date(return_date_raw, "projected_return_date")
         on_date = date.today()
-        state = store.load_item_state(item_id, on_date)
+        state = repo.load_item_state(item_id, on_date)
         validate_checkout(state, projected_return, on_date, kerberos)
 
         row = empty_transaction_row()
@@ -140,7 +141,7 @@ def checkout(item_id: str):
                 "projected_return_date": projected_return.isoformat(),
             }
         )
-        store.append_transaction(item_id, row)
+        repo.append_transaction(item_id, row)
         flash("Item checked out.", "success")
     except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
@@ -168,7 +169,7 @@ def checkin(item_id: str):
                 "Condition notes are required when condition is not OK."
             )
 
-        state = store.load_item_state(item_id, date.today())
+        state = repo.load_item_state(item_id, date.today())
         validate_checkin(state)
 
         row = empty_transaction_row()
@@ -182,7 +183,7 @@ def checkin(item_id: str):
                 "condition_description": description,
             }
         )
-        store.append_transaction(item_id, row)
+        repo.append_transaction(item_id, row)
         flash("Item checked in.", "success")
     except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
@@ -221,7 +222,7 @@ def change_condition(item_id: str):
                 "condition_description": description,
             }
         )
-        store.append_transaction(item_id, row)
+        repo.append_transaction(item_id, row)
         flash("Condition updated.", "success")
     except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
@@ -247,7 +248,7 @@ def reserve(item_id: str):
         if reserve_start > reserve_end:
             raise TransactionError("Reserve start must be on or before reserve end.")
 
-        state = store.load_item_state(item_id, date.today())
+        state = repo.load_item_state(item_id, date.today())
         validate_reserve(state, reserve_start, reserve_end)
 
         reservation_id = generate_reservation_id()
@@ -263,7 +264,7 @@ def reserve(item_id: str):
                 "reserve_end": reserve_end.isoformat(),
             }
         )
-        store.append_transaction(item_id, row)
+        repo.append_transaction(item_id, row)
         flash(f"Reservation created ({reservation_id}).", "success")
     except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
@@ -279,7 +280,7 @@ def cancel_reservation(item_id: str):
     try:
         if not reservation_id:
             raise TransactionError("Reservation id is required.")
-        state = store.load_item_state(item_id, date.today())
+        state = repo.load_item_state(item_id, date.today())
         validate_cancel_reservation(state, reservation_id)
 
         row = empty_transaction_row()
@@ -290,7 +291,7 @@ def cancel_reservation(item_id: str):
                 "reservation_id": reservation_id,
             }
         )
-        store.append_transaction(item_id, row)
+        repo.append_transaction(item_id, row)
         flash("Reservation cancelled.", "success")
     except (InventoryError, TransactionError, StorageError) as e:
         flash(str(e), "error")
@@ -301,7 +302,7 @@ def cancel_reservation(item_id: str):
 @app.route("/admin/print-qr")
 def admin_print_qr():
     try:
-        items = list(reversed(store.load_inventory()))
+        items = list(reversed(repo.load_inventory()))
     except (InventoryError, StorageError) as e:
         return render_template(
             "admin_print_qr.html",
@@ -327,7 +328,7 @@ def serve_image(filename: str):
         abort(404)
 
     try:
-        data, mime_type = store.get_image_bytes(filename)
+        data, mime_type = repo.get_image_bytes(filename)
     except StorageError:
         abort(404)
 

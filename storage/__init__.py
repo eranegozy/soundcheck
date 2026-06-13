@@ -1,15 +1,5 @@
-"""Persistent storage backends."""
+"""Google API storage client."""
 
-from storage.google_drive import GoogleDriveStore, StorageError
+from storage.google_drive import ConcurrentUpdateError, GoogleStorage, StorageError
 
-_store: GoogleDriveStore | None = None
-
-
-def get_store() -> GoogleDriveStore:
-    global _store
-    if _store is None:
-        _store = GoogleDriveStore.from_env()
-    return _store
-
-
-__all__ = ["GoogleDriveStore", "StorageError", "get_store"]
+__all__ = ["ConcurrentUpdateError", "GoogleStorage", "StorageError"]
