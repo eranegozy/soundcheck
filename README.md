@@ -71,7 +71,7 @@ Assign the service account to the Cloud Run service and set `GOOGLE_DRIVE_IMAGES
 Deploy:
 
 ```bash
-gcloud run deploy soundcheck --source .
+gcloud run deploy soundcheck --source . --region us-east1
 ```
 
 ## Run locally
