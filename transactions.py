@@ -1,7 +1,5 @@
 """Per-item transaction logs and derived loan/condition state."""
 
-import csv
-import io
 import secrets
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -193,20 +191,11 @@ def _validate_sheet_header(headers: list[str]) -> None:
         )
 
 
-def _validate_header(fieldnames: list[str] | None) -> None:
-    if not fieldnames:
-        raise TransactionError("transaction file is empty or missing a header row")
-    missing = set(TRANSACTION_COLUMNS) - set(fieldnames)
-    if missing:
-        raise TransactionError(
-            "transaction file missing columns: " + ", ".join(sorted(missing))
-        )
-
 
 def _line_ref(line_number: int | None) -> str:
     if line_number is None:
         return "new transaction"
-    return f"transaction file line {line_number}"
+    return f"transaction sheet line {line_number}"
 
 
 def _validate_row(row: dict[str, str], line_number: int | None = None) -> None:
@@ -264,11 +253,6 @@ def _validate_condition_row(row: dict[str, str], where: str) -> None:
             f"{where}: condition_description is required when condition is not ok"
         )
 
-
-def _normalize_row(row: dict[str, str]) -> dict[str, str]:
-    return {column: (row.get(column) or "").strip() for column in TRANSACTION_COLUMNS}
-
-
 def _normalize_sheet_row(row: dict[str, str]) -> dict[str, str]:
     return {
         column: (row.get(column) or "").strip() for column in SHEET_TRANSACTION_COLUMNS
@@ -321,42 +305,6 @@ def parse_transaction_rows(
         by_item.setdefault(normalized["item_id"], []).append(normalized)
 
     return all_rows, by_item
-
-
-def parse_transactions_csv(text: str) -> list[dict[str, str]]:
-    if not text.strip():
-        return []
-
-    rows: list[dict[str, str]] = []
-    reader = csv.DictReader(io.StringIO(text))
-    _validate_header(reader.fieldnames)
-
-    for line_number, row in enumerate(reader, start=2):
-        _validate_row(row, line_number)
-        rows.append(_normalize_row(row))
-
-    return rows
-
-
-def serialize_transactions_csv(rows: list[dict[str, str]]) -> str:
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=TRANSACTION_COLUMNS)
-    writer.writeheader()
-    for row in rows:
-        writer.writerow(_normalize_row(row))
-    return buffer.getvalue()
-
-
-def append_row_to_csv(existing: str | None, row: dict[str, str]) -> str:
-    normalized = _normalize_row(row)
-    _validate_row(normalized)
-
-    if not existing or not existing.strip():
-        return serialize_transactions_csv([normalized])
-
-    rows = parse_transactions_csv(existing)
-    rows.append(normalized)
-    return serialize_transactions_csv(rows)
 
 
 def _drop_past_reservations(state: ItemState, on_date: date) -> None:
