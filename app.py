@@ -17,6 +17,7 @@ from repository import get_repository
 from stickers import sticker_payload
 from storage import StorageError
 from transactions import (
+    ItemState,
     TransactionError,
     empty_transaction_row,
     generate_reservation_id,
@@ -45,8 +46,8 @@ CONDITION_CHOICES = [
 ]
 
 
-def enrich_item(item: dict, on_date: date) -> dict:
-    state = repo.load_item_state(item["item_id"], on_date)
+def enrich_item(item: dict, on_date: date, states: dict[str, ItemState]) -> dict:
+    state = states.get(item["item_id"], ItemState())
     return {
         **item,
         **item_state_dict(state, on_date),
@@ -90,7 +91,9 @@ def _render_item_page(item_id: str, on_date: date):
 def index():
     try:
         on_date = date.today()
-        items = [enrich_item(item, on_date) for item in repo.load_inventory()]
+        inventory = repo.load_inventory()
+        states = repo.load_all_item_states(on_date)
+        items = [enrich_item(item, on_date, states) for item in inventory]
     except (InventoryError, TransactionError, StorageError) as e:
         return render_template("index.html", items=[], error=str(e)), 200
 
@@ -303,7 +306,7 @@ def cancel_reservation(item_id: str):
 def admin_refresh_inventory():
     try:
         repo.refresh_inventory()
-        flash("Inventory refreshed from Google Sheet.", "success")
+        flash("Inventory and transactions refreshed from Google Sheet.", "success")
     except (InventoryError, StorageError) as e:
         flash(str(e), "error")
 

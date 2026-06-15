@@ -34,6 +34,8 @@ TRANSACTION_COLUMNS = (
     "reserve_end",
 )
 
+SHEET_TRANSACTION_COLUMNS = ("item_id",) + TRANSACTION_COLUMNS
+
 
 class TransactionError(Exception):
     """Raised when transaction data or operations are invalid."""
@@ -181,6 +183,16 @@ def generate_reservation_id(when: datetime | None = None) -> str:
     return f"res-{moment.strftime('%Y%m%d')}-{suffix}"
 
 
+def _validate_sheet_header(headers: list[str]) -> None:
+    if not headers:
+        raise TransactionError("transactions sheet is empty or missing a header row")
+    missing = set(SHEET_TRANSACTION_COLUMNS) - set(headers)
+    if missing:
+        raise TransactionError(
+            "transactions sheet missing columns: " + ", ".join(sorted(missing))
+        )
+
+
 def _validate_header(fieldnames: list[str] | None) -> None:
     if not fieldnames:
         raise TransactionError("transaction file is empty or missing a header row")
@@ -257,6 +269,60 @@ def _normalize_row(row: dict[str, str]) -> dict[str, str]:
     return {column: (row.get(column) or "").strip() for column in TRANSACTION_COLUMNS}
 
 
+def _normalize_sheet_row(row: dict[str, str]) -> dict[str, str]:
+    return {
+        column: (row.get(column) or "").strip() for column in SHEET_TRANSACTION_COLUMNS
+    }
+
+
+def _row_dict(headers: list[str], values: list[str]) -> dict[str, str]:
+    padded = values + [""] * (len(headers) - len(values))
+    return {
+        header: (padded[index] or "").strip()
+        for index, header in enumerate(headers)
+    }
+
+
+def validate_and_normalize_row(row: dict[str, str]) -> dict[str, str]:
+    normalized = _normalize_sheet_row(row)
+    _validate_row(normalized)
+    item_id = normalized["item_id"]
+    if not item_id:
+        raise TransactionError("new transaction: missing value for 'item_id'")
+    return normalized
+
+
+def row_to_sheet_values(row: dict[str, str]) -> list[str]:
+    normalized = validate_and_normalize_row(row)
+    return [normalized[column] for column in SHEET_TRANSACTION_COLUMNS]
+
+
+def parse_transaction_rows(
+    values: list[list[str]],
+) -> tuple[list[dict[str, str]], dict[str, list[dict[str, str]]]]:
+    if not values:
+        return [], {}
+
+    headers = [header.strip() for header in values[0]]
+    _validate_sheet_header(headers)
+
+    all_rows: list[dict[str, str]] = []
+    by_item: dict[str, list[dict[str, str]]] = {}
+
+    for line_number, raw_row in enumerate(values[1:], start=2):
+        row = _row_dict(headers, raw_row)
+        if not (row.get("item_id") or "").strip():
+            raise TransactionError(
+                f"transactions sheet line {line_number}: missing value for 'item_id'"
+            )
+        _validate_row(row, line_number)
+        normalized = _normalize_sheet_row(row)
+        all_rows.append(normalized)
+        by_item.setdefault(normalized["item_id"], []).append(normalized)
+
+    return all_rows, by_item
+
+
 def parse_transactions_csv(text: str) -> list[dict[str, str]]:
     if not text.strip():
         return []
@@ -301,50 +367,76 @@ def _drop_past_reservations(state: ItemState, on_date: date) -> None:
     }
 
 
+def _apply_action(state: ItemState, row: dict[str, str]) -> None:
+    action = row["action"]
+
+    if action == "checkout":
+        state.custody = "checked_out"
+        state.name = row["name"]
+        state.kerberos = row["kerberos"]
+        state.projected_return_date = parse_date(
+            row["projected_return_date"], "projected_return_date"
+        )
+    elif action == "checkin":
+        state.custody = "available"
+        state.name = None
+        state.kerberos = None
+        state.projected_return_date = None
+        state.condition = row["condition"]
+        state.condition_description = (
+            row["condition_description"] or None
+            if row["condition"] != "ok"
+            else None
+        )
+    elif action == "change_condition":
+        state.condition = row["condition"]
+        state.condition_description = (
+            row["condition_description"] or None
+            if row["condition"] != "ok"
+            else None
+        )
+    elif action == "reserve":
+        state.reservations[row["reservation_id"]] = Reservation(
+            reservation_id=row["reservation_id"],
+            reserve_start=parse_date(row["reserve_start"], "reserve_start"),
+            reserve_end=parse_date(row["reserve_end"], "reserve_end"),
+            name=row["name"],
+            kerberos=row["kerberos"],
+        )
+    elif action == "cancel_reservation":
+        state.reservations.pop(row["reservation_id"], None)
+
+
 def replay_actions(rows: list[dict[str, str]], on_date: date) -> ItemState:
     state = ItemState()
 
     for row in rows:
-        action = row["action"]
-
-        if action == "checkout":
-            state.custody = "checked_out"
-            state.name = row["name"]
-            state.kerberos = row["kerberos"]
-            state.projected_return_date = parse_date(
-                row["projected_return_date"], "projected_return_date"
-            )
-        elif action == "checkin":
-            state.custody = "available"
-            state.name = None
-            state.kerberos = None
-            state.projected_return_date = None
-            state.condition = row["condition"]
-            state.condition_description = (
-                row["condition_description"] or None
-                if row["condition"] != "ok"
-                else None
-            )
-        elif action == "change_condition":
-            state.condition = row["condition"]
-            state.condition_description = (
-                row["condition_description"] or None
-                if row["condition"] != "ok"
-                else None
-            )
-        elif action == "reserve":
-            state.reservations[row["reservation_id"]] = Reservation(
-                reservation_id=row["reservation_id"],
-                reserve_start=parse_date(row["reserve_start"], "reserve_start"),
-                reserve_end=parse_date(row["reserve_end"], "reserve_end"),
-                name=row["name"],
-                kerberos=row["kerberos"],
-            )
-        elif action == "cancel_reservation":
-            state.reservations.pop(row["reservation_id"], None)
+        _apply_action(state, row)
 
     _drop_past_reservations(state, on_date)
     return state
+
+
+def replay_all_items(
+    rows: list[dict[str, str]], on_date: date
+) -> dict[str, ItemState]:
+    states: dict[str, ItemState] = {}
+
+    for row in rows:
+        item_id = row["item_id"]
+        if item_id not in states:
+            states[item_id] = ItemState()
+        _apply_action(states[item_id], row)
+
+    for state in states.values():
+        _drop_past_reservations(state, on_date)
+
+    return states
+
+
+def apply_action_to_state(state: ItemState, row: dict[str, str], on_date: date) -> None:
+    _apply_action(state, row)
+    _drop_past_reservations(state, on_date)
 
 
 def load_item_state(transactions: list[dict[str, str]], on_date: date) -> ItemState:

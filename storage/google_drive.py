@@ -8,11 +8,11 @@ import google.auth
 from google.auth.exceptions import DefaultCredentialsError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = (
     "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/spreadsheets",
 )
 
 DRIVE_API_RETRIES = 3
@@ -28,26 +28,13 @@ class GoogleStorage:
         self._drive = None
         self._sheets = None
         self._drive_api_lock = threading.Lock()
-        self._write_locks: dict[str, threading.Lock] = {}
-        self._write_locks_guard = threading.Lock()
 
     @staticmethod
-    def _drive_error_message(exc: HttpError, context: str) -> str:
-        detail = ""
-        if exc.content:
-            detail = exc.content.decode(errors="replace").strip()
-        if "storageQuotaExceeded" in detail or (
-            "do not have storage quota" in detail.lower()
-        ):
-            return (
-                f"{context}: service accounts cannot create new files in a personal "
-                "My Drive folder. Use a Shared drive folder and add the service "
-                "account as Content manager (or Contributor)."
-            )
-        parts = [context, f"HTTP {exc.resp.status}"]
+    def _http_error_message(exc: HttpError, context: str) -> str:
+        detail = exc.content.decode(errors="replace").strip() if exc.content else ""
         if detail:
-            parts.append(detail)
-        return ": ".join(parts)
+            return f"{context}: HTTP {exc.resp.status}: {detail}"
+        return f"{context}: HTTP {exc.resp.status}"
 
     def _credentials(self):
         if self._credentials_obj is None:
@@ -81,14 +68,6 @@ class GoogleStorage:
                 cache_discovery=False,
             )
         return self._sheets
-
-    def _write_lock(self, key: str) -> threading.Lock:
-        with self._write_locks_guard:
-            lock = self._write_locks.get(key)
-            if lock is None:
-                lock = threading.Lock()
-                self._write_locks[key] = lock
-            return lock
 
     def _drive_execute(self, request):
         last_exc: Exception | None = None
@@ -128,7 +107,7 @@ class GoogleStorage:
             response = self._drive_execute(request)
         except HttpError as exc:
             raise StorageError(
-                self._drive_error_message(
+                self._http_error_message(
                     exc,
                     f"Drive list failed for {name!r} under folder {parent_id!r}",
                 )
@@ -158,53 +137,6 @@ class GoogleStorage:
                     raise StorageError(f"Drive download failed: {exc}") from exc
         raise StorageError(f"Drive download failed: {last_exc}")
 
-    def _create_file(
-        self, parent_id: str, name: str, content: str, *, mimetype: str
-    ) -> None:
-        media = MediaIoBaseUpload(
-            io.BytesIO(content.encode("utf-8")),
-            mimetype=mimetype,
-            resumable=False,
-        )
-        body = {"name": name, "parents": [parent_id]}
-        try:
-            request = self._drive_service().files().create(
-                body=body,
-                media_body=media,
-                fields="id",
-                supportsAllDrives=True,
-            )
-            self._drive_execute(request)
-        except HttpError as exc:
-            raise StorageError(
-                self._drive_error_message(
-                    exc,
-                    f"Drive create failed for {name!r}",
-                )
-            ) from exc
-
-    def _update_file(self, file_id: str, content: str, *, mimetype: str) -> None:
-        media = MediaIoBaseUpload(
-            io.BytesIO(content.encode("utf-8")),
-            mimetype=mimetype,
-            resumable=False,
-        )
-        request = self._drive_service().files().update(
-            fileId=file_id,
-            media_body=media,
-            fields="id",
-            supportsAllDrives=True,
-        )
-        try:
-            self._drive_execute(request)
-        except HttpError as exc:
-            raise StorageError(
-                self._drive_error_message(
-                    exc,
-                    f"Drive update failed for file {file_id}",
-                )
-            ) from exc
-
     def read_sheet_values(self, spreadsheet_id: str, range_name: str) -> list[list[str]]:
         try:
             request = (
@@ -218,48 +150,66 @@ class GoogleStorage:
             )
             response = self._drive_execute(request)
         except HttpError as exc:
-            if exc.resp.status == 403 and "ACCESS_TOKEN_SCOPE_INSUFFICIENT" in (
-                exc.content.decode() if exc.content else ""
-            ):
-                raise StorageError(
-                    "Google Sheets access denied: ADC token lacks required scopes. "
-                    "Re-run gcloud auth application-default login with "
-                    "--scopes=https://www.googleapis.com/auth/drive,"
-                    "https://www.googleapis.com/auth/spreadsheets.readonly"
-                ) from exc
             raise StorageError(
-                self._drive_error_message(
+                self._http_error_message(
                     exc,
                     f"Sheets read failed for spreadsheet {spreadsheet_id!r}",
                 )
             ) from exc
         return response.get("values", [])
 
-    def read_text_file(self, folder_id: str, filename: str) -> str | None:
-        files = self._find_files(folder_id, filename)
-        if not files:
-            return None
-        return self._download_bytes(files[0]["id"]).decode("utf-8")
+    def batch_get_sheet_values(
+        self, spreadsheet_id: str, ranges: list[str]
+    ) -> list[list[list[str]]]:
+        try:
+            request = (
+                self._sheets_service()
+                .spreadsheets()
+                .values()
+                .batchGet(
+                    spreadsheetId=spreadsheet_id,
+                    ranges=ranges,
+                )
+            )
+            response = self._drive_execute(request)
+        except HttpError as exc:
+            raise StorageError(
+                self._http_error_message(
+                    exc,
+                    f"Sheets batch read failed for spreadsheet {spreadsheet_id!r}",
+                )
+            ) from exc
+
+        value_ranges = response.get("valueRanges", [])
+        return [value_range.get("values", []) for value_range in value_ranges]
+
+    def append_sheet_row(
+        self, spreadsheet_id: str, range_name: str, row: list[str]
+    ) -> None:
+        try:
+            request = (
+                self._sheets_service()
+                .spreadsheets()
+                .values()
+                .append(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name,
+                    valueInputOption="RAW",
+                    insertDataOption="INSERT_ROWS",
+                    body={"values": [row]},
+                )
+            )
+            self._drive_execute(request)
+        except HttpError as exc:
+            raise StorageError(
+                self._http_error_message(
+                    exc,
+                    f"Sheets append failed for range {range_name!r}",
+                )
+            ) from exc
 
     def read_bytes_file(self, folder_id: str, filename: str) -> bytes:
         files = self._find_files(folder_id, filename)
         if not files:
             raise StorageError(f"File not found in Drive: {filename!r}")
         return self._download_bytes(files[0]["id"])
-
-    def put_text_file(
-        self,
-        folder_id: str,
-        filename: str,
-        content: str,
-        *,
-        lock_key: str | None = None,
-        mimetype: str = "text/plain",
-    ) -> None:
-        key = lock_key or f"{folder_id}/{filename}"
-        with self._write_lock(key):
-            files = self._find_files(folder_id, filename)
-            if not files:
-                self._create_file(folder_id, filename, content, mimetype=mimetype)
-                return
-            self._update_file(files[0]["id"], content, mimetype=mimetype)
