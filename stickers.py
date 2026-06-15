@@ -16,7 +16,7 @@ def sticker_payload(item: dict, detail_url: str) -> dict:
     return {
         "item_id": item["item_id"],
         "display_name": item["display_name"],
-        "location": item["location"],
+        "location": item["location_label"],
         "components": components,
         "components_text": "; ".join(components) if components else "—",
         "detail_url": detail_url,

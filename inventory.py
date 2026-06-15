@@ -8,6 +8,7 @@ COLUMNS = (
     "serial",
     "category",
     "location",
+    "shelf",
     "components",
     "image",
 )
@@ -48,8 +49,12 @@ def _validate_uniqueness(
 def display_name(brand: str, model: str, number: str) -> str:
     parts = [brand.strip(), model.strip()]
     if number.strip():
-        parts.append(number.strip())
+        parts.append('#' + number.strip())
     return " ".join(parts)
+
+
+def format_location(location: str, shelf: str) -> str:
+    return f"{location.strip()} / {shelf.strip()}"
 
 
 def parse_components(raw: str) -> list[str]:
@@ -91,6 +96,8 @@ def parse_inventory_rows(values: list[list[str]]) -> list[dict]:
         brand = row["brand"].strip()
         model = row["model"].strip()
         number = row["number"].strip()
+        location = row["location"].strip()
+        shelf = row["shelf"].strip()
         image = row["image"].strip()
 
         item_id_lines.setdefault(item_id, []).append(line_number)
@@ -104,7 +111,9 @@ def parse_inventory_rows(values: list[list[str]]) -> list[dict]:
                 "number": number,
                 "serial": row["serial"].strip(),
                 "category": row["category"].strip(),
-                "location": row["location"].strip(),
+                "location": location,
+                "shelf": shelf,
+                "location_label": format_location(location, shelf),
                 "components": parse_components(row["components"]),
                 "image": image,
                 "display_name": display_name(brand, model, number),

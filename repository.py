@@ -59,7 +59,7 @@ class SoundcheckRepository:
     def from_env(cls, google: GoogleStorage | None = None) -> "SoundcheckRepository":
         images_folder_id = os.environ.get("GOOGLE_DRIVE_IMAGES_FOLDER_ID", "").strip()
         sheet_id = os.environ.get("GOOGLE_SHEET_ID", "").strip()
-        sheet_range = os.environ.get("GOOGLE_SHEET_RANGE", "Inventory!A:I").strip()
+        sheet_range = os.environ.get("GOOGLE_SHEET_RANGE", "Inventory!A:J").strip()
         transactions_range = os.environ.get(
             "GOOGLE_TRANSACTIONS_RANGE", "Transactions!A:K"
         ).strip()
@@ -81,7 +81,7 @@ class SoundcheckRepository:
             google=google or GoogleStorage(),
             images_folder_id=_normalize_drive_id(images_folder_id),
             sheet_id=sheet_id,
-            sheet_range=sheet_range or "Inventory!A:I",
+            sheet_range=sheet_range or "Inventory!A:J",
             transactions_range=transactions_range or "Transactions!A:K",
         )
 

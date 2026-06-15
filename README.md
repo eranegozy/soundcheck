@@ -45,7 +45,7 @@ You need permission to impersonate the service account (typically `roles/iam.ser
 |----------|----------|-------------|
 | `GOOGLE_DRIVE_IMAGES_FOLDER_ID` | yes | Folder containing image files (My Drive OK; SA needs Viewer) |
 | `GOOGLE_SHEET_ID` | yes | Spreadsheet ID for inventory and transactions |
-| `GOOGLE_SHEET_RANGE` | no | Inventory tab range (default `Inventory!A:I`) |
+| `GOOGLE_SHEET_RANGE` | no | Inventory tab range (default `Inventory!A:J`) |
 | `GOOGLE_TRANSACTIONS_RANGE` | no | Transactions tab range (default `Transactions!A:K`) |
 | `PUBLIC_BASE_URL` | no | Public URL for QR codes (see below) |
 | `SECRET_KEY` | no | Flask session secret (set in production) |
@@ -59,7 +59,7 @@ gcloud auth application-default login \
 
 export GOOGLE_DRIVE_IMAGES_FOLDER_ID=your-images-folder-id
 export GOOGLE_SHEET_ID=your-spreadsheet-id
-export GOOGLE_SHEET_RANGE='Inventory!A:I'
+export GOOGLE_SHEET_RANGE='Inventory!A:J'
 export GOOGLE_TRANSACTIONS_RANGE='Transactions!A:K'
 export PUBLIC_BASE_URL=https://your-host.example.edu
 ```
@@ -113,14 +113,21 @@ Every column must be present in the header. All columns require a non-empty valu
 | `number` | Copy number when multiple units share brand/model (use `1` for a single unit). The combination of brand, model, and number must be unique. |
 | `serial` | Manufacturer serial on the item (use `n/a` if unknown) |
 | `category` | Type (e.g. microphone) |
-| `location` | Storage location |
+| `location` | Storage location (e.g. maker space) |
+| `shelf` | Shelf within that location (e.g. `2A`) |
 | `components` | Semicolon-separated list (e.g. `microphone; XLR cable`) |
 | `image` | Filename in the Drive images folder (e.g. `sm58.png`) |
 
 **Display name** (shown in the UI, not stored in the sheet):
 
 ```
-{brand} {model} {number}
+{brand} {model} #{number}
+```
+
+**Location label** (shown on item pages and QR stickers, not stored in the sheet):
+
+```
+{location} / {shelf}
 ```
 
 ## Transactions tab

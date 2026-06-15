@@ -1,7 +1,7 @@
-item_id,brand,model,number,serial,category,location,components,image
-mic-01,Shure,SM-58,1,ABC123456,microphone,equipment closet,microphone; XLR cable,sm58.png
-mic-02,Shure,SM-58,2,ABC789012,microphone,music tech lab,microphone; XLR cable,sm58.png
-interface-01,Focusrite,Scarlett 2i2,1,SN-FR-22001,audio interface,maker space,audio interface; USB cable,scarlett2i2.png
-cable-01,Mogami,Gold XLR-10,1,n/a,cable,equipment closet,XLR cable,placeholder.png
-monitor-01,KRK,Rokit 5 G4,1,SN-KRK-5501,monitor,music tech lab,powered monitor; power cable,placeholder.png
-interface-02,Focusrite,Scarlett 2i2,2,SN-FR-22002,audio interface,maker space,audio interface; USB cable,scarlett2i2.png
+item_id,brand,model,number,serial,category,location,shelf,components,image
+mic-01,Shure,SM-58,1,ABC123456,microphone,equipment closet,1A,microphone; XLR cable,sm58.png
+mic-02,Shure,SM-58,2,ABC789012,microphone,music tech lab,2B,microphone; XLR cable,sm58.png
+interface-01,Focusrite,Scarlett 2i2,1,SN-FR-22001,audio interface,maker space,2A,audio interface; USB cable,scarlett2i2.png
+cable-01,Mogami,Gold XLR-10,1,n/a,cable,equipment closet,1C,XLR cable,placeholder.png
+monitor-01,KRK,Rokit 5 G4,1,SN-KRK-5501,monitor,music tech lab,3A,powered monitor; power cable,placeholder.png
+interface-02,Focusrite,Scarlett 2i2,2,SN-FR-22002,audio interface,maker space,2A,audio interface; USB cable,scarlett2i2.png
